@@ -1,4 +1,5 @@
 ﻿using StudyScheduler.Bot.Core.Conversations;
+using StudyScheduler.Bot.Core.Messages;
 using StudyScheduler.Bot.Core.Routing;
 using StudyScheduler.Bot.Flows.AddStudent;
 using Telegram.Bot;
@@ -10,10 +11,10 @@ public sealed class StudentAddCallback(IConversationStore store) : ICallbackHand
 {
     public async Task HandleAsync(ITelegramBotClient bot, CallbackContext context)
     {
-        var state = new AddStudentState(); // дефолтний CurrentStep = AskName
-        await store.SaveAsync(context.ChatId, state);
+        await store.SaveAsync(context.ChatId, new AddStudentState());
 
-        await bot.EditMessageText(context.ChatId, context.MessageId, "👤 Введіть ім'я учня:");
+        var msg = StudentMessages.AskName();
+        await bot.EditMessageText(context.ChatId, context.MessageId, msg.Text);
         await bot.AnswerCallbackQuery(context.CallbackQueryId);
     }
 }
