@@ -1,18 +1,23 @@
-﻿using Telegram.Bot;
+﻿using StudyScheduler.Bot.Core.Routing;
+using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
-using Telegram.Bot.Types.Enums;
 
 namespace StudyScheduler.Bot;
 
 public sealed class BotWorker : BackgroundService
 {
     private readonly TelegramBotClient _botClient;
+    private readonly TelegramUpdateHandler _updateHandler;
     private readonly ILogger<BotWorker> _logger;
 
-    public BotWorker(IConfiguration configuration, ILogger<BotWorker> logger)
+    public BotWorker(
+        IConfiguration configuration,
+        TelegramUpdateHandler updateHandler,
+        ILogger<BotWorker> logger)
     {
         _logger = logger;
+        _updateHandler = updateHandler;
 
         var token = configuration["Telegram:Token"];
 
@@ -28,7 +33,7 @@ public sealed class BotWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _botClient.OnMessage += HandleMessageAsync;
+        _botClient.OnUpdate += OnUpdateReceived;
         _botClient.OnError += HandleErrorAsync;
 
         var me = await _botClient.GetMe(stoppingToken);
@@ -43,21 +48,14 @@ public sealed class BotWorker : BackgroundService
         }
         finally
         {
-            _botClient.OnMessage -= HandleMessageAsync;
+            _botClient.OnUpdate -= OnUpdateReceived;
             _botClient.OnError -= HandleErrorAsync;
         }
     }
 
-    private async Task HandleMessageAsync(Message message, UpdateType type)
+    private async Task OnUpdateReceived(Update update)
     {
-        if (message.Text is not { } messageText) return;
-
-        var chatId = message.Chat.Id;
-        _logger.LogInformation("Received message: '{Text}' from chat {ChatId}.", messageText, chatId);
-
-        await _botClient.SendMessage(
-            chatId: chatId,
-            text: $"Hello! I'm your StudyScheduler. You wrote: {messageText}");
+        await _updateHandler.HandleAsync(_botClient, update);
     }
 
     private Task HandleErrorAsync(Exception exception, HandleErrorSource source)
