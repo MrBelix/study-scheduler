@@ -38,10 +38,10 @@ public sealed class FlowEngine<TState>(
     }
 
     private async Task ApplyResultAsync(
-        StepResult result, 
-        ITelegramBotClient bot, 
-        Message message, 
-        TState state, 
+        StepResult result,
+        ITelegramBotClient bot,
+        Message message,
+        TState state,
         long chatId)
     {
         switch (result)
@@ -49,6 +49,7 @@ public sealed class FlowEngine<TState>(
             case StepResult.Next next:
                 state.CurrentStep = next.NextStep;
                 await store.SaveAsync(chatId, state);
+                await EnterStepAsync(next.NextStep, bot, message, state, chatId);
                 break;
 
             case StepResult.Repeat:
@@ -57,6 +58,7 @@ public sealed class FlowEngine<TState>(
             case StepResult.GoTo goTo:
                 state.CurrentStep = goTo.Step;
                 await store.SaveAsync(chatId, state);
+                await EnterStepAsync(goTo.Step, bot, message, state, chatId);
                 break;
 
             case StepResult.Complete:
@@ -71,5 +73,17 @@ public sealed class FlowEngine<TState>(
                 await bot.SendMessage(chatId, "❌ Скасовано");
                 break;
         }
+    }
+
+    private async Task EnterStepAsync(string stepName, ITelegramBotClient bot, Message message, TState state, long chatId)
+    {
+        if (!_steps.TryGetValue(stepName, out var step))
+        {
+            logger.LogWarning("Cannot enter unknown step {Step}", stepName);
+            return;
+        }
+
+        var ctx = new StepContext<TState>(bot, message, state, chatId);
+        await step.OnEnterAsync(ctx);
     }
 }

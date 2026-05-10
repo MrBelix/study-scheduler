@@ -27,7 +27,6 @@ public sealed class AskNameStep(AppDbContext dbContext) : IFlowStep<AddStudentSt
         }
 
         ctx.State.Name = text;
-        await ctx.Bot.SendMessage(ctx.ChatId, "💵 Ціна за урок (грн):");
         return new StepResult.Next(AddStudentState.AskPrice);
     }
 }

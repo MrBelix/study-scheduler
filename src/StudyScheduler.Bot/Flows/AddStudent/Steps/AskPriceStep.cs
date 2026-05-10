@@ -8,6 +8,9 @@ public sealed class AskPriceStep : IFlowStep<AddStudentState>
 {
     public string Name => AddStudentState.AskPrice;
 
+    public async Task OnEnterAsync(StepContext<AddStudentState> ctx) =>
+        await ctx.Bot.SendMessage(ctx.ChatId, "💵 Ціна за урок (грн):");
+
     public async Task<StepResult> HandleAsync(StepContext<AddStudentState> ctx)
     {
         var text = ctx.Message.Text?.Trim() ?? "";

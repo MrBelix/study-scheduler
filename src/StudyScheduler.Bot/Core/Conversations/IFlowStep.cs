@@ -3,5 +3,6 @@
 public interface IFlowStep<TState> where TState : IFlowState
 {
     string Name { get; }
-    Task<StepResult> HandleAsync(StepContext<TState> context);
+    Task OnEnterAsync(StepContext<TState> ctx) => Task.CompletedTask;
+    Task<StepResult> HandleAsync(StepContext<TState> ctx);
 }
