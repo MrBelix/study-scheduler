@@ -1,0 +1,7 @@
+﻿services:
+  studyscheduler.api:
+    image: studyscheduler.api
+    build:
+      context: .
+      dockerfile: src/StudyScheduler.API/Dockerfile
+
