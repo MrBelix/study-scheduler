@@ -50,7 +50,7 @@ public sealed class TelegramInitDataValidator
             hashValues.ToString() is not { Length: > 0 } providedHash)
             return TelegramAuthError.MissingData;
 
-        // signature is the separate Ed25519 third-party field and must NOT enter the HMAC check.
+        // data-check-string = all received fields except hash (signature included), per spec.
         var dataCheckString = TelegramInitData.BuildDataCheckString(
             parsed.Select(kv => new KeyValuePair<string, string>(kv.Key, kv.Value.ToString())));
 
