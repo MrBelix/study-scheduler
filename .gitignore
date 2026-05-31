@@ -4,3 +4,6 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 .idea
+
+# Локальні секрети — реальні значення тільки в .env (не комітимо), .env.example лишається
+.env
