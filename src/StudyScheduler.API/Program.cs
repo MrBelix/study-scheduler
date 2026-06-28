@@ -26,6 +26,20 @@ builder.Services.AddAuthentication(TelegramAuthOptions.Scheme)
         TelegramAuthOptions.Scheme, _ => { });
 builder.Services.AddAuthorization();
 
+// CORS for the Mini App client. Auth travels in the Authorization header (no
+// cookies), so credentials aren't needed. In Development any origin is allowed
+// to ease localhost/ngrok testing; production uses the configured allow-list.
+const string CorsPolicy = "MiniApp";
+builder.Services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
+{
+    var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+    if (builder.Environment.IsDevelopment() && origins.Length == 0)
+        policy.SetIsOriginAllowed(_ => true);
+    else
+        policy.WithOrigins(origins);
+    policy.AllowAnyHeader().AllowAnyMethod();
+}));
+
 builder.Services.AddSingleton<IStudentRepository, InMemoryStudentRepository>();
 
 var app = builder.Build();
@@ -38,6 +52,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors(CorsPolicy);
 
 app.UseAuthentication();
 app.UseAuthorization();

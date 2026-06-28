@@ -15,14 +15,13 @@ internal static class TelegramInitData
         HMACSHA256.HashData("WebAppData"u8.ToArray(), Encoding.UTF8.GetBytes(botToken));
 
     /// <summary>
-    /// Fields sorted by key and joined as <c>key=value</c> with '\n', excluding both <c>hash</c>
-    /// and <c>signature</c>. Telegram computes the HMAC <c>hash</c> over the data WITHOUT the
-    /// separate Ed25519 <c>signature</c> field, so including it here would make every real
-    /// request fail the signature check. <c>signature</c> is only used by third-party validators.
+    /// Fields sorted by key and joined as <c>key=value</c> with '\n', excluding only <c>hash</c>.
+    /// Per the Telegram spec the HMAC is computed over every received field except <c>hash</c> —
+    /// including the newer <c>signature</c> field. (Verified against real init data.)
     /// </summary>
     public static string BuildDataCheckString(IEnumerable<KeyValuePair<string, string>> fields) =>
         string.Join('\n', fields
-            .Where(kv => kv.Key != "hash" && kv.Key != "signature")
+            .Where(kv => kv.Key != "hash")
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .Select(kv => $"{kv.Key}={kv.Value}"));
 
