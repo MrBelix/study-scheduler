@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 
-namespace StudyScheduler.API.Authentication;
+namespace StudyScheduler.API.Core.Authentication;
 
 /// <summary>
 /// Documents the Telegram init data header as an API-key security scheme so the OpenAPI UI

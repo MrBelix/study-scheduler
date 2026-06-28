@@ -3,7 +3,7 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
-namespace StudyScheduler.API.Authentication;
+namespace StudyScheduler.API.Core.Authentication;
 
 /// <summary>
 /// Authenticates each request by validating the Telegram init data passed in the

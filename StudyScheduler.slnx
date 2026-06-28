@@ -4,5 +4,6 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/StudyScheduler.API/StudyScheduler.API.csproj" />
+    <Project Path="src/StudyScheduler.Domain/StudyScheduler.Domain.csproj" />
   </Folder>
 </Solution>

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 
-namespace StudyScheduler.API.Authentication;
+namespace StudyScheduler.API.Core.Authentication;
 
 /// <summary>
 /// Options for the Telegram Mini App authentication scheme.

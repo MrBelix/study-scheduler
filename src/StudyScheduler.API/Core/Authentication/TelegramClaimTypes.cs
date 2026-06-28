@@ -1,4 +1,4 @@
-namespace StudyScheduler.API.Authentication;
+namespace StudyScheduler.API.Core.Authentication;
 
 /// <summary>Custom claim types for data carried from Telegram init data.</summary>
 public static class TelegramClaimTypes

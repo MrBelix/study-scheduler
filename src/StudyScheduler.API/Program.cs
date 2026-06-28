@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Scalar.AspNetCore;
-using StudyScheduler.API.Authentication;
+using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.API.Features.Students;
+using StudyScheduler.Domain.Students;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +26,8 @@ builder.Services.AddAuthentication(TelegramAuthOptions.Scheme)
         TelegramAuthOptions.Scheme, _ => { });
 builder.Services.AddAuthorization();
 
+builder.Services.AddSingleton<IStudentRepository, InMemoryStudentRepository>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -46,5 +50,7 @@ app.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new
     LastName = user.FindFirstValue(ClaimTypes.Surname),
 }))
 .RequireAuthorization();
+
+Endpoints.Map(app);
 
 app.Run();

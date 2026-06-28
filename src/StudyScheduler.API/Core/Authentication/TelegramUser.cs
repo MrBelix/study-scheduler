@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace StudyScheduler.API.Authentication;
+namespace StudyScheduler.API.Core.Authentication;
 
 /// <summary>
 /// User payload embedded in the <c>user</c> field of Telegram init data (snake_case JSON).

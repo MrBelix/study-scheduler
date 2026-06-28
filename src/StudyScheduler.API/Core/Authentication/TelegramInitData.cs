@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace StudyScheduler.API.Authentication;
+namespace StudyScheduler.API.Core.Authentication;
 
 /// <summary>
 /// Shared primitives for the Telegram init data HMAC scheme — used both to verify incoming
@@ -15,13 +15,14 @@ internal static class TelegramInitData
         HMACSHA256.HashData("WebAppData"u8.ToArray(), Encoding.UTF8.GetBytes(botToken));
 
     /// <summary>
-    /// Fields sorted by key and joined as <c>key=value</c> with '\n', excluding only <c>hash</c>.
-    /// Per the Telegram spec the data-check-string is "all received fields except hash", so
-    /// <c>signature</c> (the separate Ed25519 third-party field) IS included in the HMAC check.
+    /// Fields sorted by key and joined as <c>key=value</c> with '\n', excluding both <c>hash</c>
+    /// and <c>signature</c>. Telegram computes the HMAC <c>hash</c> over the data WITHOUT the
+    /// separate Ed25519 <c>signature</c> field, so including it here would make every real
+    /// request fail the signature check. <c>signature</c> is only used by third-party validators.
     /// </summary>
     public static string BuildDataCheckString(IEnumerable<KeyValuePair<string, string>> fields) =>
         string.Join('\n', fields
-            .Where(kv => kv.Key != "hash")
+            .Where(kv => kv.Key != "hash" && kv.Key != "signature")
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .Select(kv => $"{kv.Key}={kv.Value}"));
 
