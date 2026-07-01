@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace StudyScheduler.Tests;
+namespace StudyScheduler.Tests.Core.Authentication;
 
 /// <summary>
 /// Independently mints Telegram init data the way the Telegram servers do, so the validator

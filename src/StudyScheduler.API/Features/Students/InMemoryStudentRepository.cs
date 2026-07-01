@@ -14,12 +14,20 @@ public sealed class InMemoryStudentRepository : IStudentRepository
     public Task<Student?> GetByIdAsync(Guid id) =>
         Task.FromResult(_students.GetValueOrDefault(id));
 
-    public Task<List<Student>> GetAllByOwnerIdAsync(long ownerTelegramId) =>
+    public Task<List<Student>> GetAllByTutorIdAsync(long tutorTelegramId) =>
         Task.FromResult(_students.Values
-            .Where(s => s.OwnerTelegramId == ownerTelegramId)
+            .Where(s => s.TutorTelegramId == tutorTelegramId)
             .ToList());
 
     public Task AddAsync(Student student)
+    {
+        _students[student.Id] = student;
+        return Task.CompletedTask;
+    }
+
+    // Entities are stored by reference, so mutations are already visible. Kept for
+    // parity with the EF Core implementation, where this maps to SaveChanges.
+    public Task UpdateAsync(Student student)
     {
         _students[student.Id] = student;
         return Task.CompletedTask;

@@ -2,7 +2,7 @@ using Microsoft.Extensions.Options;
 using StudyScheduler.API.Core.Authentication;
 using Xunit;
 
-namespace StudyScheduler.Tests;
+namespace StudyScheduler.Tests.Core.Authentication;
 
 public class TelegramInitDataValidatorTests
 {

@@ -1,7 +1,7 @@
 using StudyScheduler.Domain.Students;
 using Xunit;
 
-namespace StudyScheduler.Tests;
+namespace StudyScheduler.Tests.Domain.Students;
 
 public class StudentTests
 {

@@ -6,4 +6,7 @@
     <Project Path="src/StudyScheduler.API/StudyScheduler.API.csproj" />
     <Project Path="src/StudyScheduler.Domain/StudyScheduler.Domain.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/StudyScheduler.Tests/StudyScheduler.Tests.csproj" />
+  </Folder>
 </Solution>

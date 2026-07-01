@@ -7,3 +7,4 @@ riderModule.iml
 
 # Локальні секрети — реальні значення тільки в .env (не комітимо), .env.example лишається
 .env
+StudyScheduler.sln.DotSettings.user

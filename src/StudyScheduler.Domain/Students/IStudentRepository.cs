@@ -8,7 +8,9 @@ public interface IStudentRepository
 {
     Task<Student?> GetByIdAsync(Guid id);
 
-    Task<List<Student>> GetAllByOwnerIdAsync(long ownerTelegramId);
+    Task<List<Student>> GetAllByTutorIdAsync(long tutorTelegramId);
 
     Task AddAsync(Student student);
+
+    Task UpdateAsync(Student student);
 }
