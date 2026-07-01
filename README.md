@@ -80,6 +80,13 @@ dotnet test tests/StudyScheduler.IntegrationTests/StudyScheduler.IntegrationTest
 > **Rider on Windows:** the Aspire integration tests hang under Rider's Aspire-plugin test runner
 > (known JetBrains issue). Run them from the CLI, or disable the Aspire plugin.
 
+### Integrate the frontend
+
+The React Mini App (separate repo, `StudySchedulerClient`) calls this API with an
+`Authorization: tma <initData>` header, scoped to the current tutor. The endpoint reference is the
+OpenAPI document (Scalar UI at `/scalar`); the client-side integration contract is documented in that
+repo. To allow the frontend in production, set `Cors__AllowedOrigins__0` to its origin.
+
 ### Deploy
 
 Push to `main` — the GitHub Actions pipeline runs tests, then (only if they pass) publishes the API

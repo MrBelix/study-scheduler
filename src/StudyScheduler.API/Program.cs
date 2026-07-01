@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using StudyScheduler.API.Core.Authentication;
 using StudyScheduler.API.Core.Cors;
 using StudyScheduler.API.Core.OpenApi;
@@ -11,6 +12,10 @@ builder.AddPersistence();
 
 builder.Services.AddApiDocumentation();
 builder.Services.AddSingleton(TimeProvider.System);
+
+// Serialize enums as strings (e.g. StudentStatus → "Active") for a friendlier API contract.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddTelegramAuthentication();
 builder.Services.AddMiniAppCors(builder.Configuration, builder.Environment);
 builder.Services.AddStudentsFeature();
