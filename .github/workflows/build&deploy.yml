@@ -52,7 +52,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # required for OIDC azure/login
+      id-token: write # required for OIDC azure
       contents: read
     steps:
       - uses: actions/download-artifact@v4
