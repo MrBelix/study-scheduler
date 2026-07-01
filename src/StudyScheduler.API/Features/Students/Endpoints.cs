@@ -5,20 +5,11 @@ using StudyScheduler.Domain.Students;
 
 namespace StudyScheduler.API.Features.Students;
 
-public static class Endpoints
+/// <summary>HTTP handlers for the Students feature. Wired to routes in <see cref="StudentsModule"/>.</summary>
+internal static class Endpoints
 {
-    public static void Map(IEndpointRouteBuilder app)
-    {
-        var group = app.MapGroup("/students").RequireAuthorization();
-
-        group.MapGet("/", GetMine);
-        group.MapGet("/{id:guid}", GetById);
-        group.MapPost("/", Create);
-        group.MapPatch("/{id:guid}", Update);
-    }
-
     /// <summary>Lists the students owned by the current tutor.</summary>
-    private static async Task<Ok<List<StudentResponse>>> GetMine(
+    public static async Task<Ok<List<StudentResponse>>> GetMine(
         ClaimsPrincipal principal,
         IStudentRepository repo)
     {
@@ -27,7 +18,7 @@ public static class Endpoints
     }
 
     /// <summary>Returns a single student, scoped to the current tutor.</summary>
-    private static async Task<Results<Ok<StudentResponse>, NotFound>> GetById(
+    public static async Task<Results<Ok<StudentResponse>, NotFound>> GetById(
         Guid id,
         ClaimsPrincipal principal,
         IStudentRepository repo)
@@ -40,7 +31,7 @@ public static class Endpoints
     }
 
     /// <summary>Creates a student under the current tutor.</summary>
-    private static async Task<Results<Created<StudentResponse>, ValidationProblem>> Create(
+    public static async Task<Results<Created<StudentResponse>, ValidationProblem>> Create(
         ClaimsPrincipal principal,
         CreateStudentRequest request,
         IStudentRepository repo,
@@ -62,7 +53,7 @@ public static class Endpoints
     }
 
     /// <summary>Partially updates a student (including archive via status), scoped to the current tutor.</summary>
-    private static async Task<Results<Ok<StudentResponse>, NotFound, ValidationProblem>> Update(
+    public static async Task<Results<Ok<StudentResponse>, NotFound, ValidationProblem>> Update(
         Guid id,
         ClaimsPrincipal principal,
         UpdateStudentRequest request,

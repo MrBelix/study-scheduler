@@ -1,0 +1,46 @@
+using Aspire.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace StudyScheduler.IntegrationTests;
+
+/// <summary>
+/// Boots the whole Aspire app (SQL Server container + API) once and shares it across the test
+/// collection — starting the container is expensive, so we pay it a single time.
+/// </summary>
+public sealed class AppFixture : IAsyncLifetime
+{
+    private DistributedApplication? _app;
+
+    public HttpClient Api { get; private set; } = null!;
+
+    public async Task InitializeAsync()
+    {
+        var builder = await DistributedApplicationTestingBuilder.CreateAsync<Projects.StudyScheduler_AppHost>();
+        builder.Services.AddLogging(logging =>
+        {
+            logging.SetMinimumLevel(LogLevel.Warning);
+            // Suppress the piped stdout of the SQL container and the API (EF commands, HTTP logs).
+            logging.AddFilter("StudyScheduler.AppHost.Resources", LogLevel.Warning);
+            logging.AddFilter("Aspire.Hosting", LogLevel.Warning);
+        });
+
+        _app = await builder.BuildAsync();
+        await _app.StartAsync();
+
+        Api = _app.CreateHttpClient("api");
+        await _app.ResourceNotifications
+            .WaitForResourceHealthyAsync("api")
+            .WaitAsync(TimeSpan.FromMinutes(8));
+    }
+
+    public async Task DisposeAsync()
+    {
+        Api?.Dispose();
+        if (_app is not null)
+            await _app.DisposeAsync();
+    }
+}
+
+/// <summary>Shares a single <see cref="AppFixture"/> across every test class in the collection.</summary>
+[CollectionDefinition(nameof(AppCollection))]
+public sealed class AppCollection : ICollectionFixture<AppFixture>;

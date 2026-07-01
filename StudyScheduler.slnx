@@ -1,12 +1,14 @@
 <Solution>
-  <Folder Name="/Solution Items/">
-    <File Path="compose.yaml" />
-  </Folder>
   <Folder Name="/src/">
     <Project Path="src/StudyScheduler.API/StudyScheduler.API.csproj" />
     <Project Path="src/StudyScheduler.Domain/StudyScheduler.Domain.csproj" />
   </Folder>
+  <Folder Name="/host/">
+    <Project Path="host/StudyScheduler.AppHost/StudyScheduler.AppHost.csproj" />
+    <Project Path="host/StudyScheduler.ServiceDefaults/StudyScheduler.ServiceDefaults.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/StudyScheduler.Tests/StudyScheduler.Tests.csproj" />
+    <Project Path="tests/StudyScheduler.IntegrationTests/StudyScheduler.IntegrationTests.csproj" />
   </Folder>
 </Solution>

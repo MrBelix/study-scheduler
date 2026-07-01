@@ -7,10 +7,9 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Build & Test
+  unit:
+    name: Unit tests
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,5 +25,20 @@ jobs:
       - name: Build
         run: dotnet build StudyScheduler.slnx --configuration Release --no-restore
 
-      - name: Test
-        run: dotnet test StudyScheduler.slnx --configuration Release --no-build --verbosity normal
+      - name: Unit tests
+        run: dotnet test tests/StudyScheduler.Tests/StudyScheduler.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  integration:
+    name: Integration tests (Aspire + SQL Server)
+    runs-on: ubuntu-latest # ubuntu runners ship a running Docker daemon that Aspire/Testcontainers use
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Integration tests
+        run: dotnet test tests/StudyScheduler.IntegrationTests/StudyScheduler.IntegrationTests.csproj --configuration Release --verbosity normal
