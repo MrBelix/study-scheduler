@@ -27,10 +27,19 @@ public sealed class AppFixture : IAsyncLifetime
         _app = await builder.BuildAsync();
         await _app.StartAsync();
 
-        Api = _app.CreateHttpClient("api");
         await _app.ResourceNotifications
             .WaitForResourceHealthyAsync("api")
             .WaitAsync(TimeSpan.FromMinutes(8));
+
+        // Talk to the API's HTTPS endpoint but skip cert validation: the ASP.NET dev cert isn't
+        // trusted on CI (Linux) runners, which otherwise fails the TLS handshake. Fine for tests.
+        Api = new HttpClient(new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+        })
+        {
+            BaseAddress = _app.GetEndpoint("api", "https"),
+        };
     }
 
     public async Task DisposeAsync()
