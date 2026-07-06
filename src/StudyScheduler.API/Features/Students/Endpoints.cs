@@ -37,7 +37,7 @@ internal static class Endpoints
         IStudentRepository repo,
         TimeProvider clock)
     {
-        if (Validate(request.Name, request.Rate) is { } errors)
+        if (Validate(request.Name, request.Rate, request.TimeZoneId) is { } errors)
             return TypedResults.ValidationProblem(errors);
 
         var student = Student.Create(
@@ -46,7 +46,8 @@ internal static class Endpoints
             request.Rate,
             clock.GetUtcNow(),
             request.Subject,
-            request.Contact);
+            request.Contact,
+            ParseTimeZone(request.TimeZoneId));
 
         await repo.AddAsync(student);
         return TypedResults.Created($"/students/{student.Id}", StudentResponse.From(student));
@@ -65,14 +66,15 @@ internal static class Endpoints
 
         var name = request.Name ?? student.Name;
         var rate = request.Rate ?? student.Rate;
-        if (Validate(name, rate) is { } errors)
+        if (Validate(name, rate, request.TimeZoneId) is { } errors)
             return TypedResults.ValidationProblem(errors);
 
         student.UpdateDetails(
             name,
             rate,
             request.Subject ?? student.Subject,
-            request.Contact ?? student.Contact);
+            request.Contact ?? student.Contact,
+            request.TimeZoneId is null ? student.TimeZone : ParseTimeZone(request.TimeZoneId));
 
         if (request.Status is { } status)
             student.ChangeStatus(status);
@@ -81,14 +83,20 @@ internal static class Endpoints
         return TypedResults.Ok(StudentResponse.From(student));
     }
 
-    private static Dictionary<string, string[]>? Validate(string? name, decimal rate)
+    private static Dictionary<string, string[]>? Validate(string? name, decimal rate, string? timeZoneId)
     {
         var errors = new Dictionary<string, string[]>();
         if (string.IsNullOrWhiteSpace(name))
             errors["Name"] = ["Name is required."];
         if (rate < 0)
             errors["Rate"] = ["Rate must be zero or positive."];
+        if (!string.IsNullOrWhiteSpace(timeZoneId) && !TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId.Trim(), out _))
+            errors["TimeZoneId"] = ["Unknown time zone."];
 
         return errors.Count == 0 ? null : errors;
     }
+
+    /// <summary>Assumes the id already passed validation; blank means "no time zone".</summary>
+    private static TimeZoneInfo? ParseTimeZone(string? timeZoneId) =>
+        string.IsNullOrWhiteSpace(timeZoneId) ? null : TimeZoneInfo.FindSystemTimeZoneById(timeZoneId.Trim());
 }

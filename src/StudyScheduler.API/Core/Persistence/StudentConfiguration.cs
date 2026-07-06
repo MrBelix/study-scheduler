@@ -18,6 +18,7 @@ internal sealed class StudentConfiguration : IEntityTypeConfiguration<Student>
         builder.Property(s => s.Name).IsRequired().HasMaxLength(200);
         builder.Property(s => s.Subject).HasMaxLength(200);
         builder.Property(s => s.Contact).HasMaxLength(200);
+        builder.Property(s => s.TimeZone).HasColumnName("TimeZoneId").HasTimeZoneConversion();
 
         builder.Property(s => s.Rate).HasPrecision(18, 2);
 

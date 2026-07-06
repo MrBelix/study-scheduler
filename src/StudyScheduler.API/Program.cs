@@ -3,6 +3,8 @@ using StudyScheduler.API.Core.Authentication;
 using StudyScheduler.API.Core.Cors;
 using StudyScheduler.API.Core.OpenApi;
 using StudyScheduler.API.Core.Persistence;
+using StudyScheduler.API.Features.Lessons;
+using StudyScheduler.API.Features.Profile;
 using StudyScheduler.API.Features.Students;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +21,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddTelegramAuthentication();
 builder.Services.AddMiniAppCors(builder.Configuration, builder.Environment);
 builder.Services.AddStudentsFeature();
+builder.Services.AddProfileFeature();
+builder.Services.AddLessonsFeature();
 
 var app = builder.Build();
 
@@ -32,6 +36,8 @@ app.UseAuthorization();
 
 app.MapCurrentUser();
 app.MapStudentsFeature();
+app.MapProfileFeature();
+app.MapLessonsFeature();
 app.MapDefaultEndpoints();
 
 app.Run();

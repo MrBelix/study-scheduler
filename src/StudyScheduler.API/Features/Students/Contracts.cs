@@ -7,7 +7,8 @@ public sealed record CreateStudentRequest(
     string Name,
     decimal Rate,
     string? Subject,
-    string? Contact);
+    string? Contact,
+    string? TimeZoneId);
 
 /// <summary>
 /// Partial update — only non-null fields are applied. <c>Rate</c> is nullable so "not provided"
@@ -18,6 +19,7 @@ public sealed record UpdateStudentRequest(
     decimal? Rate,
     string? Subject,
     string? Contact,
+    string? TimeZoneId,
     StudentStatus? Status);
 
 /// <summary>Student projection returned to the client.</summary>
@@ -27,6 +29,7 @@ public sealed record StudentResponse(
     decimal Rate,
     string? Subject,
     string? Contact,
+    string? TimeZoneId,
     StudentStatus Status,
     DateTimeOffset CreatedAtUtc)
 {
@@ -36,6 +39,7 @@ public sealed record StudentResponse(
         student.Rate,
         student.Subject,
         student.Contact,
+        student.TimeZone?.Id,
         student.Status,
         student.CreatedAtUtc);
 }

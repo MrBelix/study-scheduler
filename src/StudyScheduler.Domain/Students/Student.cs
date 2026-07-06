@@ -11,7 +11,8 @@ public sealed class Student : Entity
         decimal rate,
         DateTimeOffset createdAtUtc,
         string? subject,
-        string? contact)
+        string? contact,
+        TimeZoneInfo? timeZone)
         : base(id)
     {
         TutorTelegramId = tutorTelegramId;
@@ -20,6 +21,7 @@ public sealed class Student : Entity
         CreatedAtUtc = createdAtUtc;
         Subject = subject;
         Contact = contact;
+        TimeZone = timeZone;
         Status = StudentStatus.Active;
     }
 
@@ -35,6 +37,9 @@ public sealed class Student : Entity
 
     public string? Contact { get; private set; }
 
+    /// <summary>Optional time zone of the student (informational); persisted by its IANA id.</summary>
+    public TimeZoneInfo? TimeZone { get; private set; }
+
     public StudentStatus Status { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
@@ -45,7 +50,8 @@ public sealed class Student : Entity
         decimal rate,
         DateTimeOffset createdAtUtc,
         string? subject = null,
-        string? contact = null)
+        string? contact = null,
+        TimeZoneInfo? timeZone = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tutorTelegramId);
         ArgumentOutOfRangeException.ThrowIfNegative(rate);
@@ -59,11 +65,12 @@ public sealed class Student : Entity
             rate,
             createdAtUtc,
             Normalize(subject),
-            Normalize(contact));
+            Normalize(contact),
+            timeZone);
     }
 
     /// <summary>Replaces the editable profile fields.</summary>
-    public void UpdateDetails(string name, decimal rate, string? subject, string? contact)
+    public void UpdateDetails(string name, decimal rate, string? subject, string? contact, TimeZoneInfo? timeZone)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(rate);
         if (string.IsNullOrWhiteSpace(name))
@@ -73,6 +80,7 @@ public sealed class Student : Entity
         Rate = rate;
         Subject = Normalize(subject);
         Contact = Normalize(contact);
+        TimeZone = timeZone;
     }
 
     public void ChangeStatus(StudentStatus status) => Status = status;

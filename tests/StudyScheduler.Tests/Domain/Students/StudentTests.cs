@@ -57,12 +57,13 @@ public class StudentTests
     {
         var student = Student.Create(555, "Bob", 100m, CreatedAt, "Math", "@bob");
 
-        student.UpdateDetails("Alice", 300m, "Physics", null);
+        student.UpdateDetails("Alice", 300m, "Physics", null, TimeZoneInfo.FindSystemTimeZoneById("Europe/Kyiv"));
 
         Assert.Equal("Alice", student.Name);
         Assert.Equal(300m, student.Rate);
         Assert.Equal("Physics", student.Subject);
         Assert.Null(student.Contact);
+        Assert.Equal("Europe/Kyiv", student.TimeZone?.Id);
         Assert.Equal(555, student.TutorTelegramId); // ownership never changes
     }
 
@@ -71,7 +72,15 @@ public class StudentTests
     {
         var student = Student.Create(555, "Bob", 100m, CreatedAt);
 
-        Assert.Throws<ArgumentException>(() => student.UpdateDetails(" ", 100m, null, null));
+        Assert.Throws<ArgumentException>(() => student.UpdateDetails(" ", 100m, null, null, null));
+    }
+
+    [Fact]
+    public void Create_WithoutTimeZone_LeavesItNull()
+    {
+        var student = Student.Create(555, "Bob", 100m, CreatedAt);
+
+        Assert.Null(student.TimeZone);
     }
 
     [Fact]
