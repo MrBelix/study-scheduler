@@ -7,77 +7,84 @@ namespace StudyScheduler.API.Features.Lessons;
 /// <summary>EF Core implementation of <see cref="ILessonRepository"/> (SQL Server).</summary>
 public sealed class EfLessonRepository(AppDbContext db) : ILessonRepository
 {
-    public async Task<Lesson?> GetByIdAsync(Guid id) =>
-        await db.Lessons.FindAsync(id);
+    public async Task<Lesson?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
+        await db.Lessons.FindAsync([id], ct);
 
     public async Task<List<Lesson>> GetByTutorInRangeAsync(
         long tutorTelegramId,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
-        Guid? studentId = null) =>
+        Guid? studentId = null,
+        CancellationToken ct = default) =>
         await db.Lessons
+            .AsNoTracking()
             .Where(l => l.TutorTelegramId == tutorTelegramId
                 && l.StartUtc < toUtc
                 && l.EndUtc > fromUtc
                 && (studentId == null || l.StudentId == studentId))
             .OrderBy(l => l.StartUtc)
-            .ToListAsync();
+            .ToListAsync(ct);
 
     public async Task<List<Lesson>> GetOverlappingAsync(
         long tutorTelegramId,
         DateTimeOffset startUtc,
         DateTimeOffset endUtc,
-        Guid? excludeLessonId = null) =>
+        Guid? excludeLessonId = null,
+        CancellationToken ct = default) =>
         await db.Lessons
+            .AsNoTracking()
             .Where(l => l.TutorTelegramId == tutorTelegramId
                 && l.Status != LessonStatus.Cancelled
                 && l.StartUtc < endUtc
                 && l.EndUtc > startUtc
                 && (excludeLessonId == null || l.Id != excludeLessonId))
-            .ToListAsync();
+            .ToListAsync(ct);
 
-    public async Task<List<Lesson>> GetFromDateAsync(long tutorTelegramId, DateTimeOffset fromUtc) =>
+    public async Task<List<Lesson>> GetFromDateAsync(
+        long tutorTelegramId,
+        DateTimeOffset fromUtc,
+        CancellationToken ct = default) =>
         await db.Lessons
+            .AsNoTracking()
             .Where(l => l.TutorTelegramId == tutorTelegramId
                 && l.Status != LessonStatus.Cancelled
                 && l.StartUtc >= fromUtc)
-            .ToListAsync();
+            .ToListAsync(ct);
 
-    public async Task<List<DateOnly>> GetOccurrenceDatesAsync(Guid seriesId, DateOnly fromLocal, DateOnly toLocal) =>
-        await db.Lessons
-            .Where(l => l.SeriesId == seriesId
+    public async Task<List<(Guid SeriesId, DateOnly OccurrenceDate)>> GetOccurrenceDatesForSeriesAsync(
+        IReadOnlyCollection<Guid> seriesIds,
+        DateOnly fromLocal,
+        DateOnly toLocal,
+        CancellationToken ct = default)
+    {
+        var rows = await db.Lessons
+            .AsNoTracking()
+            .Where(l => l.SeriesId != null
+                && seriesIds.Contains(l.SeriesId.Value)
                 && l.OccurrenceDate >= fromLocal
                 && l.OccurrenceDate <= toLocal)
-            .Select(l => l.OccurrenceDate!.Value)
-            .ToListAsync();
+            .Select(l => new { SeriesId = l.SeriesId!.Value, OccurrenceDate = l.OccurrenceDate!.Value })
+            .ToListAsync(ct);
 
-    public async Task<List<Lesson>> GetBySeriesIdAsync(long tutorTelegramId, Guid seriesId) =>
+        return rows.Select(r => (r.SeriesId, r.OccurrenceDate)).ToList();
+    }
+
+    public async Task<Lesson?> GetBySeriesOccurrenceAsync(
+        Guid seriesId,
+        DateOnly occurrenceDate,
+        CancellationToken ct = default) =>
         await db.Lessons
-            .Where(l => l.TutorTelegramId == tutorTelegramId && l.SeriesId == seriesId)
-            .OrderBy(l => l.StartUtc)
-            .ToListAsync();
+            .SingleOrDefaultAsync(l => l.SeriesId == seriesId && l.OccurrenceDate == occurrenceDate, ct);
 
-    public async Task AddAsync(Lesson lesson)
+    public async Task AddAsync(Lesson lesson, CancellationToken ct = default)
     {
         db.Lessons.Add(lesson);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(ct);
     }
 
-    public async Task AddRangeAsync(IReadOnlyCollection<Lesson> lessons)
-    {
-        db.Lessons.AddRange(lessons);
-        await db.SaveChangesAsync();
-    }
-
-    public async Task UpdateAsync(Lesson lesson)
+    public async Task UpdateAsync(Lesson lesson, CancellationToken ct = default)
     {
         db.Lessons.Update(lesson);
-        await db.SaveChangesAsync();
-    }
-
-    public async Task UpdateRangeAsync(IReadOnlyCollection<Lesson> lessons)
-    {
-        db.Lessons.UpdateRange(lessons);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(ct);
     }
 }

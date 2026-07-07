@@ -1,4 +1,4 @@
-using StudyScheduler.API.Core.Persistence;
+using StudyScheduler.API.Core.RateLimiting;
 using StudyScheduler.Domain.Students;
 
 namespace StudyScheduler.API.Features.Students;
@@ -21,8 +21,10 @@ public static class StudentsModule
 
         group.MapGet("/", Endpoints.GetMine);
         group.MapGet("/{id:guid}", Endpoints.GetById);
-        group.MapPost("/", Endpoints.Create);
-        group.MapPatch("/{id:guid}", Endpoints.Update);
+        group.MapPost("/", Endpoints.Create)
+            .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
+        group.MapPatch("/{id:guid}", Endpoints.Update)
+            .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
 
         return app;
     }

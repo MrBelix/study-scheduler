@@ -5,9 +5,10 @@ namespace StudyScheduler.Domain.Lessons;
 /// <summary>
 /// A recurring lesson rule: "on <see cref="Weekdays"/> at <see cref="StartTimeLocal"/> in
 /// <see cref="TimeZone"/>, from <see cref="StartDate"/> until <see cref="EndDate"/> (or forever)".
-/// Concrete <see cref="Lesson"/> rows are materialized lazily from this rule when a date range is
-/// read. The time is defined in the tutor's local wall clock, so occurrences stay at the same
-/// local time across DST transitions.
+/// Occurrences are expanded virtually (in memory) from this rule at read time; a concrete
+/// <see cref="Lesson"/> row is only written when a specific slot is modified. The time is defined
+/// in the tutor's local wall clock, so occurrences stay at the same local time across DST
+/// transitions.
 /// </summary>
 public sealed class LessonSeries : Entity
 {
@@ -67,7 +68,11 @@ public sealed class LessonSeries : Entity
     /// <summary>Per-lesson price; <c>null</c> falls back to the student's rate at materialization.</summary>
     public decimal? Price { get; private set; }
 
-    /// <summary>False once the series is cancelled — no further occurrences are materialized.</summary>
+    /// <summary>
+    /// False only when the series was ended before it ever produced an occurrence — such a series
+    /// is skipped entirely by virtual expansion. A series ended mid-life stays active with a
+    /// bounded <see cref="EndDate"/>, so its past occurrences keep expanding.
+    /// </summary>
     public bool IsActive { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
@@ -129,7 +134,27 @@ public sealed class LessonSeries : Entity
         Price = price;
     }
 
-    public void Deactivate() => IsActive = false;
+    /// <summary>
+    /// Ends the series: no occurrences happen after <paramref name="lastDate"/>. Ending before
+    /// <see cref="StartDate"/> deactivates the series entirely (it never produced an occurrence);
+    /// otherwise the existing <see cref="EndDate"/> is only ever tightened, never extended.
+    /// Physical lessons are untouched — future virtual slots simply stop expanding.
+    /// </summary>
+    public void End(DateOnly lastDate)
+    {
+        if (lastDate < StartDate)
+        {
+            IsActive = false;
+            return;
+        }
+
+        if (EndDate is null || EndDate > lastDate)
+            EndDate = lastDate;
+    }
+
+    /// <summary>Ends the series as of "today" in its own time zone — see <see cref="End"/>.</summary>
+    public void EndAsOf(DateTimeOffset nowUtc) =>
+        End(DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(nowUtc, TimeZone).DateTime));
 
     /// <summary>
     /// Computes the concrete occurrences whose local date falls within

@@ -1,3 +1,4 @@
+using StudyScheduler.API.Core.RateLimiting;
 using StudyScheduler.Domain.Tutors;
 
 namespace StudyScheduler.API.Features.Profile;
@@ -19,7 +20,9 @@ public static class ProfileModule
         var group = app.MapGroup("/profile").RequireAuthorization();
 
         group.MapGet("/", Endpoints.Get);
-        group.MapPut("/", Endpoints.Put);
+        group.MapPut("/", Endpoints.Put)
+            .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
+        group.MapGet("/timezones", Endpoints.GetTimeZones);
 
         return app;
     }

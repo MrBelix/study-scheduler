@@ -228,12 +228,44 @@ public class LessonSeriesTests
     }
 
     [Fact]
-    public void Deactivate_TurnsSeriesInactive()
+    public void End_AfterStartDate_TightensEndDateAndStaysActive()
     {
         var series = CreateSeries();
 
-        series.Deactivate();
+        series.End(StartDate.AddDays(14));
+
+        Assert.Equal(StartDate.AddDays(14), series.EndDate);
+        Assert.True(series.IsActive);
+    }
+
+    [Fact]
+    public void End_NeverExtendsAnExistingEndDate()
+    {
+        var series = CreateSeries(endDate: StartDate.AddDays(7));
+
+        series.End(StartDate.AddDays(21));
+
+        Assert.Equal(StartDate.AddDays(7), series.EndDate);
+    }
+
+    [Fact]
+    public void End_BeforeStartDate_DeactivatesSeries()
+    {
+        var series = CreateSeries();
+
+        series.End(StartDate.AddDays(-1));
 
         Assert.False(series.IsActive);
+    }
+
+    [Fact]
+    public void End_OnStartDate_KeepsThatDayAndStaysActive()
+    {
+        var series = CreateSeries();
+
+        series.End(StartDate);
+
+        Assert.Equal(StartDate, series.EndDate);
+        Assert.True(series.IsActive);
     }
 }

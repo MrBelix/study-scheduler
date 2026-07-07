@@ -3,14 +3,18 @@ using StudyScheduler.Domain.Primitives;
 namespace StudyScheduler.Domain.Lessons;
 
 /// <summary>
-/// A concrete lesson occurrence — either created directly (one-off) or materialized from a
-/// <see cref="LessonSeries"/>. Times are stored in UTC; <see cref="EndUtc"/> is denormalized
-/// (always <c>StartUtc + DurationMinutes</c>) so overlap queries stay SQL-translatable and indexed.
+/// A concrete lesson occurrence — either created directly (one-off) or materialized on demand
+/// from a <see cref="LessonSeries"/> when a specific slot is first modified (topic/description,
+/// cancel, reschedule…). Untouched series slots are never stored; they are expanded virtually at
+/// read time. Times are stored in UTC; <see cref="EndUtc"/> is denormalized (always
+/// <c>StartUtc + DurationMinutes</c>) so overlap queries stay SQL-translatable and indexed.
 /// </summary>
 public sealed class Lesson : Entity
 {
     public const int MinDurationMinutes = 15;
     public const int MaxDurationMinutes = 600;
+    public const int MaxTopicLength = 200;
+    public const int MaxDescriptionLength = 2000;
 
     private Lesson(
         Guid id,
@@ -21,6 +25,7 @@ public sealed class Lesson : Entity
         decimal price,
         DateTimeOffset createdAtUtc,
         string? topic,
+        string? description,
         Guid? seriesId,
         DateOnly? occurrenceDate)
         : base(id)
@@ -33,6 +38,7 @@ public sealed class Lesson : Entity
         Price = price;
         CreatedAtUtc = createdAtUtc;
         Topic = topic;
+        Description = description;
         SeriesId = seriesId;
         OccurrenceDate = occurrenceDate;
         Status = LessonStatus.Scheduled;
@@ -48,9 +54,10 @@ public sealed class Lesson : Entity
     public Guid? SeriesId { get; private set; }
 
     /// <summary>
-    /// Canonical local date of the series occurrence this lesson materializes. Together with
-    /// <see cref="SeriesId"/> it makes materialization idempotent (unique index) even after the
-    /// lesson is rescheduled to a different time.
+    /// Canonical local date of the series slot this lesson materializes — the original scheduled
+    /// date, which never changes even if the lesson is rescheduled to another time. Together with
+    /// <see cref="SeriesId"/> it strictly maps the physical record back to its virtual slot in the
+    /// series (unique index), so on-the-fly expansion knows the slot is taken.
     /// </summary>
     public DateOnly? OccurrenceDate { get; private set; }
 
@@ -68,8 +75,11 @@ public sealed class Lesson : Entity
 
     public bool IsPaid { get; private set; }
 
-    /// <summary>Free-form topic / notes for the lesson.</summary>
+    /// <summary>Short subject of the lesson.</summary>
     public string? Topic { get; private set; }
+
+    /// <summary>Free-form notes / details for the lesson.</summary>
+    public string? Description { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
@@ -81,6 +91,7 @@ public sealed class Lesson : Entity
         decimal price,
         DateTimeOffset createdAtUtc,
         string? topic = null,
+        string? description = null,
         Guid? seriesId = null,
         DateOnly? occurrenceDate = null)
     {
@@ -100,7 +111,8 @@ public sealed class Lesson : Entity
             durationMinutes,
             price,
             createdAtUtc,
-            Normalize(topic),
+            NormalizeText(topic, MaxTopicLength, nameof(topic)),
+            NormalizeText(description, MaxDescriptionLength, nameof(description)),
             seriesId,
             occurrenceDate);
     }
@@ -114,7 +126,13 @@ public sealed class Lesson : Entity
         EndUtc = startUtc.AddMinutes(durationMinutes);
     }
 
-    public void ChangeStatus(LessonStatus status) => Status = status;
+    public void ChangeStatus(LessonStatus status)
+    {
+        if (!Enum.IsDefined(status))
+            throw new ArgumentException($"Unknown lesson status '{status}'.", nameof(status));
+
+        Status = status;
+    }
 
     public void SetPrice(decimal price)
     {
@@ -124,7 +142,11 @@ public sealed class Lesson : Entity
 
     public void SetPaid(bool isPaid) => IsPaid = isPaid;
 
-    public void UpdateTopic(string? topic) => Topic = Normalize(topic);
+    public void UpdateTopic(string? topic) =>
+        Topic = NormalizeText(topic, MaxTopicLength, nameof(topic));
+
+    public void UpdateDescription(string? description) =>
+        Description = NormalizeText(description, MaxDescriptionLength, nameof(description));
 
     private static void ValidateDuration(int durationMinutes)
     {
@@ -135,6 +157,15 @@ public sealed class Lesson : Entity
                 $"Duration must be between {MinDurationMinutes} and {MaxDurationMinutes} minutes.");
     }
 
-    private static string? Normalize(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string? NormalizeText(string? value, int maxLength, string paramName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length > maxLength)
+            throw new ArgumentException($"Must not exceed {maxLength} characters.", paramName);
+
+        return trimmed;
+    }
 }

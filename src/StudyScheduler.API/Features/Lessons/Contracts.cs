@@ -8,7 +8,8 @@ public sealed record CreateLessonRequest(
     DateTimeOffset StartUtc,
     int DurationMinutes,
     decimal? Price,
-    string? Topic);
+    string? Topic,
+    string? Description);
 
 /// <summary>
 /// Request body for creating a recurring series. <c>Weekdays</c> is a flags combination
@@ -28,6 +29,7 @@ public sealed record CreateLessonSeriesRequest(
 
 /// <summary>
 /// Partial update — only non-null fields are applied. Cancelling is <c>Status = "Cancelled"</c>.
+/// Also the body of the virtual-slot mutation endpoint, which materializes the slot first.
 /// </summary>
 public sealed record UpdateLessonRequest(
     DateTimeOffset? StartUtc,
@@ -35,7 +37,8 @@ public sealed record UpdateLessonRequest(
     LessonStatus? Status,
     decimal? Price,
     bool? IsPaid,
-    string? Topic);
+    string? Topic,
+    string? Description);
 
 /// <summary>Partial update of a series. Changing the weekday/time means cancel + recreate.</summary>
 public sealed record UpdateLessonSeriesRequest(
@@ -43,9 +46,13 @@ public sealed record UpdateLessonSeriesRequest(
     DateOnly? EndDate,
     decimal? Price);
 
-/// <summary>Lesson projection returned to the client.</summary>
+/// <summary>
+/// Lesson projection returned to the client. <c>IsVirtual</c> true means the slot was expanded
+/// on the fly from its series and has no database row (and thus no <c>Id</c>) — mutate it via
+/// <c>PATCH /lessons/series/{seriesId}/occurrences/{occurrenceDate}</c>, which materializes it.
+/// </summary>
 public sealed record LessonResponse(
-    Guid Id,
+    Guid? Id,
     Guid StudentId,
     Guid? SeriesId,
     DateOnly? OccurrenceDate,
@@ -56,6 +63,8 @@ public sealed record LessonResponse(
     decimal Price,
     bool IsPaid,
     string? Topic,
+    string? Description,
+    bool IsVirtual,
     DateTimeOffset CreatedAtUtc)
 {
     public static LessonResponse From(Lesson lesson) => new(
@@ -70,7 +79,26 @@ public sealed record LessonResponse(
         lesson.Price,
         lesson.IsPaid,
         lesson.Topic,
+        lesson.Description,
+        IsVirtual: false,
         lesson.CreatedAtUtc);
+
+    /// <summary>An unmaterialized series slot, generated in memory for the requested range.</summary>
+    public static LessonResponse Virtual(LessonSeries series, LessonOccurrence occurrence, decimal price) => new(
+        Id: null,
+        series.StudentId,
+        series.Id,
+        occurrence.OccurrenceDate,
+        occurrence.StartUtc,
+        occurrence.EndUtc,
+        series.DurationMinutes,
+        LessonStatus.Scheduled,
+        price,
+        IsPaid: false,
+        Topic: null,
+        Description: null,
+        IsVirtual: true,
+        series.CreatedAtUtc);
 }
 
 /// <summary>Series projection returned to the client.</summary>
@@ -116,5 +144,3 @@ public sealed record LessonConflict(
 
 /// <summary>409 payload listing everything the requested time collides with.</summary>
 public sealed record LessonConflictResponse(string Message, List<LessonConflict> Conflicts);
-
-public sealed record CancelSeriesResponse(int CancelledCount);

@@ -83,7 +83,13 @@ public sealed class Student : Entity
         TimeZone = timeZone;
     }
 
-    public void ChangeStatus(StudentStatus status) => Status = status;
+    public void ChangeStatus(StudentStatus status)
+    {
+        if (!Enum.IsDefined(status))
+            throw new ArgumentException($"Unknown student status '{status}'.", nameof(status));
+
+        Status = status;
+    }
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

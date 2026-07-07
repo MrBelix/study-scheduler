@@ -10,7 +10,10 @@ namespace StudyScheduler.API.Features.Lessons;
 /// The check-then-insert flow can race (SQL Server has no range-exclusion constraint), but the
 /// tenant is a single human tutor — the realistic race is a double-click — so this is accepted.
 /// </summary>
-public sealed class LessonOverlapChecker(ILessonRepository lessons, ILessonSeriesRepository seriesRepo)
+public sealed class LessonOverlapChecker(
+    ILessonRepository lessons,
+    ILessonSeriesRepository seriesRepo,
+    ILogger<LessonOverlapChecker> logger)
 {
     /// <summary>
     /// Series-vs-series conflicts are searched within this horizon from the start of the ranges'
@@ -18,16 +21,23 @@ public sealed class LessonOverlapChecker(ILessonRepository lessons, ILessonSerie
     /// </summary>
     private const int SeriesConflictHorizonDays = 728; // 104 weeks
 
-    /// <summary>Conflicts for a single lesson slot (create or reschedule).</summary>
+    /// <summary>
+    /// Conflicts for a single lesson slot (create or reschedule).
+    /// <paramref name="excludeOccurrence"/> exempts one series slot from the virtual-occurrence
+    /// check — used when that very slot is being materialized (its row is not saved yet, so it
+    /// would otherwise conflict with itself).
+    /// </summary>
     public async Task<List<LessonConflict>> CheckLessonAsync(
         long tutorTelegramId,
         DateTimeOffset startUtc,
         DateTimeOffset endUtc,
-        Guid? excludeLessonId = null)
+        Guid? excludeLessonId = null,
+        (Guid SeriesId, DateOnly OccurrenceDate)? excludeOccurrence = null,
+        CancellationToken ct = default)
     {
         var conflicts = new List<LessonConflict>();
 
-        foreach (var lesson in await lessons.GetOverlappingAsync(tutorTelegramId, startUtc, endUtc, excludeLessonId))
+        foreach (var lesson in await lessons.GetOverlappingAsync(tutorTelegramId, startUtc, endUtc, excludeLessonId, ct))
             conflicts.Add(FromLesson(lesson));
 
         // Unmaterialized occurrences of active series. ±2 days covers any duration (≤ 10 h) and
@@ -35,27 +45,47 @@ public sealed class LessonOverlapChecker(ILessonRepository lessons, ILessonSerie
         var fromLocal = DateOnly.FromDateTime(startUtc.UtcDateTime).AddDays(-2);
         var toLocal = DateOnly.FromDateTime(endUtc.UtcDateTime).AddDays(2);
 
-        foreach (var series in await seriesRepo.GetActiveByTutorAsync(tutorTelegramId))
+        // Expand candidates in memory first, then fetch the materialized occurrence dates of all
+        // relevant series in one bulk query (instead of one query per series).
+        var candidates = new List<(LessonSeries Series, List<LessonOccurrence> Occurrences)>();
+        foreach (var series in await seriesRepo.GetActiveByTutorAsync(tutorTelegramId, ct))
         {
-            var candidates = series.GetOccurrences(fromLocal, toLocal)
+            var occurrences = series.GetOccurrences(fromLocal, toLocal)
                 .Where(o => o.StartUtc < endUtc && o.EndUtc > startUtc)
                 .ToList();
-            if (candidates.Count == 0)
-                continue;
+            if (occurrences.Count > 0)
+                candidates.Add((series, occurrences));
+        }
 
+        if (candidates.Count > 0)
+        {
             // A materialized occurrence is governed by its concrete lesson (already checked above;
             // if it was cancelled or rescheduled away, the slot is free).
-            var materialized = (await lessons.GetOccurrenceDatesAsync(series.Id, fromLocal, toLocal)).ToHashSet();
-            conflicts.AddRange(candidates
-                .Where(o => !materialized.Contains(o.OccurrenceDate))
-                .Select(o => FromSeries(series, o)));
+            var materialized = GroupBySeries(await lessons.GetOccurrenceDatesForSeriesAsync(
+                candidates.Select(c => c.Series.Id).ToList(), fromLocal, toLocal, ct));
+
+            foreach (var (series, occurrences) in candidates)
+            {
+                var taken = materialized.GetValueOrDefault(series.Id);
+                conflicts.AddRange(occurrences
+                    .Where(o => taken is null || !taken.Contains(o.OccurrenceDate))
+                    .Where(o => excludeOccurrence is not { } excl
+                        || excl.SeriesId != series.Id
+                        || excl.OccurrenceDate != o.OccurrenceDate)
+                    .Select(o => FromSeries(series, o)));
+            }
         }
+
+        if (conflicts.Count > 0)
+            logger.LogInformation(
+                "Detected {ConflictCount} scheduling conflicts for tutor {TutorTelegramId} in [{StartUtc}, {EndUtc})",
+                conflicts.Count, tutorTelegramId, startUtc, endUtc);
 
         return conflicts;
     }
 
     /// <summary>Conflicts for a new series: against existing lessons and other active series.</summary>
-    public async Task<List<LessonConflict>> CheckSeriesAsync(LessonSeries candidate)
+    public async Task<List<LessonConflict>> CheckSeriesAsync(LessonSeries candidate, CancellationToken ct = default)
     {
         var conflicts = new List<LessonConflict>();
 
@@ -63,7 +93,7 @@ public sealed class LessonOverlapChecker(ILessonRepository lessons, ILessonSerie
         // occurrences across the span of the tutor's future lessons and compare in memory.
         var seriesStartUtc = new DateTimeOffset(
             candidate.StartDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).AddDays(-2);
-        var futureLessons = await lessons.GetFromDateAsync(candidate.TutorTelegramId, seriesStartUtc);
+        var futureLessons = await lessons.GetFromDateAsync(candidate.TutorTelegramId, seriesStartUtc, ct);
         if (futureLessons.Count > 0)
         {
             var minLocal = DateOnly.FromDateTime(futureLessons.Min(l => l.StartUtc).UtcDateTime).AddDays(-2);
@@ -75,7 +105,7 @@ public sealed class LessonOverlapChecker(ILessonRepository lessons, ILessonSerie
                     .Select(FromLesson));
         }
 
-        foreach (var other in await seriesRepo.GetActiveByTutorAsync(candidate.TutorTelegramId))
+        foreach (var other in await seriesRepo.GetActiveByTutorAsync(candidate.TutorTelegramId, ct))
         {
             if (other.Id == candidate.Id)
                 continue;
@@ -83,6 +113,11 @@ public sealed class LessonOverlapChecker(ILessonRepository lessons, ILessonSerie
             if (FirstCollision(candidate, other) is { } collision)
                 conflicts.Add(FromSeries(other, collision));
         }
+
+        if (conflicts.Count > 0)
+            logger.LogInformation(
+                "Detected {ConflictCount} scheduling conflicts for tutor {TutorTelegramId} while creating a series starting {StartDate}",
+                conflicts.Count, candidate.TutorTelegramId, candidate.StartDate);
 
         return conflicts;
     }
@@ -108,6 +143,20 @@ public sealed class LessonOverlapChecker(ILessonRepository lessons, ILessonSerie
         }
 
         return null;
+    }
+
+    private static Dictionary<Guid, HashSet<DateOnly>> GroupBySeries(
+        List<(Guid SeriesId, DateOnly OccurrenceDate)> rows)
+    {
+        var sets = new Dictionary<Guid, HashSet<DateOnly>>();
+        foreach (var (seriesId, occurrenceDate) in rows)
+        {
+            if (!sets.TryGetValue(seriesId, out var set))
+                sets[seriesId] = set = new HashSet<DateOnly>();
+            set.Add(occurrenceDate);
+        }
+
+        return sets;
     }
 
     private static LessonConflict FromLesson(Lesson lesson) =>

@@ -37,6 +37,42 @@ public class LessonTests
         Assert.Null(lesson.Topic);
     }
 
+    [Fact]
+    public void Create_WithDescription_TrimsAndStores()
+    {
+        var lesson = Lesson.Create(555, StudentId, Start, 60, 250m, CreatedAt, description: "  Chapter 4, ex. 12–20  ");
+
+        Assert.Equal("Chapter 4, ex. 12–20", lesson.Description);
+    }
+
+    [Fact]
+    public void Create_TopicTooLong_Throws()
+    {
+        var topic = new string('x', Lesson.MaxTopicLength + 1);
+
+        Assert.Throws<ArgumentException>(
+            () => Lesson.Create(555, StudentId, Start, 60, 250m, CreatedAt, topic: topic));
+    }
+
+    [Fact]
+    public void Create_DescriptionTooLong_Throws()
+    {
+        var description = new string('x', Lesson.MaxDescriptionLength + 1);
+
+        Assert.Throws<ArgumentException>(
+            () => Lesson.Create(555, StudentId, Start, 60, 250m, CreatedAt, description: description));
+    }
+
+    [Fact]
+    public void UpdateDescription_BlankValue_NormalizedToNull()
+    {
+        var lesson = Lesson.Create(555, StudentId, Start, 60, 250m, CreatedAt, description: "notes");
+
+        lesson.UpdateDescription("   ");
+
+        Assert.Null(lesson.Description);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]

@@ -6,14 +6,15 @@ namespace StudyScheduler.Domain.Lessons;
 /// </summary>
 public interface ILessonRepository
 {
-    Task<Lesson?> GetByIdAsync(Guid id);
+    Task<Lesson?> GetByIdAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Lessons of the tutor intersecting <c>[fromUtc, toUtc)</c>, ordered by start.</summary>
     Task<List<Lesson>> GetByTutorInRangeAsync(
         long tutorTelegramId,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
-        Guid? studentId = null);
+        Guid? studentId = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Non-cancelled lessons of the tutor overlapping <c>(startUtc, endUtc)</c> — strict
@@ -23,22 +24,32 @@ public interface ILessonRepository
         long tutorTelegramId,
         DateTimeOffset startUtc,
         DateTimeOffset endUtc,
-        Guid? excludeLessonId = null);
+        Guid? excludeLessonId = null,
+        CancellationToken ct = default);
 
     /// <summary>Non-cancelled lessons of the tutor starting at or after <paramref name="fromUtc"/>.</summary>
-    Task<List<Lesson>> GetFromDateAsync(long tutorTelegramId, DateTimeOffset fromUtc);
+    Task<List<Lesson>> GetFromDateAsync(
+        long tutorTelegramId,
+        DateTimeOffset fromUtc,
+        CancellationToken ct = default);
 
-    /// <summary>Occurrence dates of a series already materialized within the local date range.</summary>
-    Task<List<DateOnly>> GetOccurrenceDatesAsync(Guid seriesId, DateOnly fromLocal, DateOnly toLocal);
+    /// <summary>
+    /// Occurrence dates already materialized within the local date range, for many series in one
+    /// round trip (avoids the per-series N+1 when expanding schedules).
+    /// </summary>
+    Task<List<(Guid SeriesId, DateOnly OccurrenceDate)>> GetOccurrenceDatesForSeriesAsync(
+        IReadOnlyCollection<Guid> seriesIds,
+        DateOnly fromLocal,
+        DateOnly toLocal,
+        CancellationToken ct = default);
 
-    Task<List<Lesson>> GetBySeriesIdAsync(long tutorTelegramId, Guid seriesId);
+    /// <summary>The physical lesson materialized for a specific series slot, if any.</summary>
+    Task<Lesson?> GetBySeriesOccurrenceAsync(
+        Guid seriesId,
+        DateOnly occurrenceDate,
+        CancellationToken ct = default);
 
-    Task AddAsync(Lesson lesson);
+    Task AddAsync(Lesson lesson, CancellationToken ct = default);
 
-    /// <summary>Adds the batch atomically (single SaveChanges).</summary>
-    Task AddRangeAsync(IReadOnlyCollection<Lesson> lessons);
-
-    Task UpdateAsync(Lesson lesson);
-
-    Task UpdateRangeAsync(IReadOnlyCollection<Lesson> lessons);
+    Task UpdateAsync(Lesson lesson, CancellationToken ct = default);
 }

@@ -49,4 +49,44 @@ public class TutorProfileTests
 
         Assert.Throws<ArgumentNullException>(() => profile.UpdateTimeZone(null!));
     }
+
+    [Fact]
+    public void Create_WithoutLanguage_LeavesItNull()
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt);
+
+        Assert.Null(profile.LanguageCode);
+    }
+
+    [Fact]
+    public void Create_WithLanguage_NormalizesToLowerCase()
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: " UK ");
+
+        Assert.Equal("uk", profile.LanguageCode);
+    }
+
+    [Fact]
+    public void UpdateLanguage_Valid_Replaces()
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: "uk");
+
+        profile.UpdateLanguage("en");
+
+        Assert.Equal("en", profile.LanguageCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("u")]
+    [InlineData("ukr")]
+    [InlineData("u1")]
+    [InlineData("u-")]
+    public void UpdateLanguage_NotTwoLetters_Throws(string code)
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt);
+
+        Assert.Throws<ArgumentException>(() => profile.UpdateLanguage(code));
+    }
 }

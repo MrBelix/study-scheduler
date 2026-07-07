@@ -16,8 +16,8 @@ internal sealed class LessonConfiguration : IEntityTypeConfiguration<Lesson>
         // Ownership / scope key + start: serves both range lists and overlap scans.
         builder.HasIndex(l => new { l.TutorTelegramId, l.StartUtc });
 
-        // Makes lazy materialization idempotent: a series occurrence (identified by its canonical
-        // local date) can only be inserted once, even under concurrent GETs.
+        // Strict physical-row → virtual-slot mapping: a series slot (identified by its canonical
+        // local date) can only be materialized once, even under concurrent mutations.
         builder.HasIndex(l => new { l.SeriesId, l.OccurrenceDate })
             .IsUnique()
             .HasFilter("[SeriesId] IS NOT NULL");
@@ -28,7 +28,8 @@ internal sealed class LessonConfiguration : IEntityTypeConfiguration<Lesson>
             .HasConversion<string>()
             .HasMaxLength(20);
 
-        builder.Property(l => l.Topic).HasMaxLength(1000);
+        builder.Property(l => l.Topic).HasMaxLength(Lesson.MaxTopicLength);
+        builder.Property(l => l.Description).HasMaxLength(Lesson.MaxDescriptionLength);
         builder.Property(l => l.CreatedAtUtc);
 
         // FKs without navigation properties — aggregates stay decoupled. Restrict is safe:

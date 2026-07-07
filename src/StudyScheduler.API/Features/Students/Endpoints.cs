@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Students;
 
 namespace StudyScheduler.API.Features.Students;
@@ -11,9 +12,10 @@ internal static class Endpoints
     /// <summary>Lists the students owned by the current tutor.</summary>
     public static async Task<Ok<List<StudentResponse>>> GetMine(
         ClaimsPrincipal principal,
-        IStudentRepository repo)
+        IStudentRepository repo,
+        CancellationToken ct)
     {
-        var students = await repo.GetAllByTutorIdAsync(principal.GetTelegramId());
+        var students = await repo.GetAllByTutorIdAsync(principal.GetTelegramId(), ct);
         return TypedResults.Ok(students.Select(StudentResponse.From).ToList());
     }
 
@@ -21,9 +23,10 @@ internal static class Endpoints
     public static async Task<Results<Ok<StudentResponse>, NotFound>> GetById(
         Guid id,
         ClaimsPrincipal principal,
-        IStudentRepository repo)
+        IStudentRepository repo,
+        CancellationToken ct)
     {
-        var student = await repo.GetByIdAsync(id);
+        var student = await repo.GetByIdAsync(id, ct);
         if (student is null || student.TutorTelegramId != principal.GetTelegramId())
             return TypedResults.NotFound();
 
@@ -35,7 +38,8 @@ internal static class Endpoints
         ClaimsPrincipal principal,
         CreateStudentRequest request,
         IStudentRepository repo,
-        TimeProvider clock)
+        TimeProvider clock,
+        CancellationToken ct)
     {
         if (Validate(request.Name, request.Rate, request.TimeZoneId) is { } errors)
             return TypedResults.ValidationProblem(errors);
@@ -49,25 +53,37 @@ internal static class Endpoints
             request.Contact,
             ParseTimeZone(request.TimeZoneId));
 
-        await repo.AddAsync(student);
+        await repo.AddAsync(student, ct);
         return TypedResults.Created($"/students/{student.Id}", StudentResponse.From(student));
     }
 
-    /// <summary>Partially updates a student (including archive via status), scoped to the current tutor.</summary>
+    /// <summary>
+    /// Partially updates a student (including archive via status), scoped to the current tutor.
+    /// Archiving also ends the student's active lesson series: their future virtual slots stop
+    /// expanding and stop blocking the tutor's schedule. Physical lessons (past or individually
+    /// touched) stay untouched, and un-archiving does not resurrect the ended series.
+    /// </summary>
     public static async Task<Results<Ok<StudentResponse>, NotFound, ValidationProblem>> Update(
         Guid id,
         ClaimsPrincipal principal,
         UpdateStudentRequest request,
-        IStudentRepository repo)
+        IStudentRepository repo,
+        ILessonSeriesRepository seriesRepo,
+        TimeProvider clock,
+        CancellationToken ct)
     {
-        var student = await repo.GetByIdAsync(id);
-        if (student is null || student.TutorTelegramId != principal.GetTelegramId())
+        var tutorId = principal.GetTelegramId();
+
+        var student = await repo.GetByIdAsync(id, ct);
+        if (student is null || student.TutorTelegramId != tutorId)
             return TypedResults.NotFound();
 
         var name = request.Name ?? student.Name;
         var rate = request.Rate ?? student.Rate;
         if (Validate(name, rate, request.TimeZoneId) is { } errors)
             return TypedResults.ValidationProblem(errors);
+
+        var archiving = request.Status == StudentStatus.Archived && student.Status != StudentStatus.Archived;
 
         student.UpdateDetails(
             name,
@@ -79,7 +95,17 @@ internal static class Endpoints
         if (request.Status is { } status)
             student.ChangeStatus(status);
 
-        await repo.UpdateAsync(student);
+        await repo.UpdateAsync(student, ct);
+
+        if (archiving)
+        {
+            foreach (var series in await seriesRepo.GetActiveByStudentAsync(tutorId, student.Id, ct))
+            {
+                series.EndAsOf(clock.GetUtcNow());
+                await seriesRepo.UpdateAsync(series, ct);
+            }
+        }
+
         return TypedResults.Ok(StudentResponse.From(student));
     }
 
