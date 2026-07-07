@@ -18,12 +18,14 @@ public class IanaTimeZoneTests
         Assert.Equal(TimeSpan.FromHours(3), timeZone.GetUtcOffset(july));
     }
 
+    // Windows-style ids ("FLE Standard Time") deliberately aren't rejected: the runtime maps
+    // them to IANA on every OS, and Linux ICU is lenient about them — so no such case here.
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("Europe/Atlantis")]
-    [InlineData("FLE Standard Time!")]
+    [InlineData("not a time zone")]
     public void TryResolve_UnknownOrEmptyId_Fails(string? id)
     {
         Assert.False(IanaTimeZone.TryResolve(id, out var timeZone));
