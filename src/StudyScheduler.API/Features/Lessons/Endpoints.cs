@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.API.Core.Time;
 using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Students;
 using StudyScheduler.Domain.Tutors;
@@ -261,9 +262,11 @@ internal static class Endpoints
     }
 
     /// <summary>
-    /// Creates a weekly series in the tutor's profile time zone. Lessons are not written here —
-    /// the first range read materializes them. 409 if the weekly slot collides with existing
-    /// lessons or another active series.
+    /// Creates a weekly series anchored in <c>TimeZoneId</c> (defaults to the tutor's profile
+    /// zone; e.g. the student's zone keeps the lesson stable on the student's clock across
+    /// mismatched DST transitions). Lessons are not written here — the first range read
+    /// materializes them. 409 if the weekly slot collides with existing lessons or another
+    /// active series.
     /// </summary>
     public static async Task<Results<Created<LessonSeriesResponse>, ValidationProblem, Conflict<LessonConflictResponse>>> CreateSeries(
         ClaimsPrincipal principal,
@@ -284,6 +287,9 @@ internal static class Endpoints
             errors["Weekdays"] = ["At least one weekday is required (e.g. \"Monday, Thursday\")."];
         if (request.EndDate is { } endDate && endDate < request.StartDate)
             errors["EndDate"] = ["End date must not precede start date."];
+        TimeZoneInfo? explicitZone = null;
+        if (!string.IsNullOrWhiteSpace(request.TimeZoneId) && !IanaTimeZone.TryResolve(request.TimeZoneId, out explicitZone))
+            errors["TimeZoneId"] = ["A valid IANA time zone id is required (e.g. \"Europe/Kyiv\")."];
         if (errors.Count > 0)
             return TypedResults.ValidationProblem(errors);
 
@@ -305,7 +311,7 @@ internal static class Endpoints
             request.Weekdays,
             request.StartTimeLocal,
             request.DurationMinutes,
-            profile.TimeZone,
+            explicitZone ?? profile.TimeZone,
             clock.GetUtcNow(),
             request.Title,
             request.EndDate,

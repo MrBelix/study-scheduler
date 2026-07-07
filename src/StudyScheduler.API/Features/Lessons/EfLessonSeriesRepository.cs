@@ -37,6 +37,16 @@ public sealed class EfLessonSeriesRepository(AppDbContext db) : ILessonSeriesRep
             .OrderBy(s => s.CreatedAtUtc)
             .ToListAsync(ct);
 
+    // Tracked: the profile-zone-change flow mutates and saves these entities. The equality
+    // comparison translates through the TimeZoneInfo→string value converter to the stored id.
+    public async Task<List<LessonSeries>> GetActiveByTimeZoneAsync(
+        long tutorTelegramId,
+        TimeZoneInfo timeZone,
+        CancellationToken ct = default) =>
+        await db.LessonSeries
+            .Where(s => s.TutorTelegramId == tutorTelegramId && s.IsActive && s.TimeZone == timeZone)
+            .ToListAsync(ct);
+
     public async Task AddAsync(LessonSeries series, CancellationToken ct = default)
     {
         db.LessonSeries.Add(series);

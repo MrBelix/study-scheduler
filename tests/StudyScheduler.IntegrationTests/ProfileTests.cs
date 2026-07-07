@@ -25,9 +25,12 @@ public class ProfileTests(AppFixture app)
         // spaces ("FLE Standard Time"), IANA ids never do.
         Assert.All(ids, id => Assert.DoesNotContain(' ', id));
 
-        // Every advertised id must pass the exact check PUT /profile applies.
+        // Every advertised id must be resolvable the way PUT /profile resolves it: directly, or
+        // via its rename twin (the list adds the spelling the host tzdata may lack).
         Assert.All(ids, id => Assert.True(
-            TimeZoneInfo.TryFindSystemTimeZoneById(id, out _), $"'{id}' is not resolvable"));
+            TimeZoneInfo.TryFindSystemTimeZoneById(id, out _)
+            || (RenameTwins.TryGetValue(id, out var twin) && TimeZoneInfo.TryFindSystemTimeZoneById(twin, out _)),
+            $"'{id}' is not resolvable"));
 
         // And the list round-trips end-to-end into PUT /profile.
         var put = await app.Api.PutAs(tutor, "/profile", new { timeZoneId = ids[0] });
@@ -66,6 +69,24 @@ public class ProfileTests(AppFixture app)
         Assert.Equal("Europe/Warsaw", fetched.TimeZoneId);
     }
 
+    [Fact]
+    public async Task Timezones_advertises_both_spellings_of_renamed_zones_and_put_accepts_either()
+    {
+        var tutor = TelegramInitData.ForUser(3204, "Alice");
+
+        // Devices may detect either the modern or the pre-2022 spelling; both must be offered…
+        var ids = (await (await app.Api.GetAs(tutor, "/profile/timezones")).Content
+            .ReadFromJsonAsync<List<string>>())!;
+        Assert.Contains("Europe/Kyiv", ids);
+        Assert.Contains("Europe/Kiev", ids);
+
+        // …and both must save, whichever spelling the host tzdata canonicalizes to.
+        var modern = await PutProfile(tutor, new { timeZoneId = "Europe/Kyiv" });
+        Assert.Contains(modern.TimeZoneId, new[] { "Europe/Kyiv", "Europe/Kiev" });
+        var legacy = await PutProfile(tutor, new { timeZoneId = "Europe/Kiev" });
+        Assert.Contains(legacy.TimeZoneId, new[] { "Europe/Kyiv", "Europe/Kiev" });
+    }
+
     [Theory]
     [InlineData("ukr")]
     [InlineData("u")]
@@ -78,6 +99,21 @@ public class ProfileTests(AppFixture app)
         var response = await app.Api.PutAs(tutor, "/profile", new { timeZoneId = "Europe/Kyiv", languageCode });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    /// <summary>Mirror of the API's rename-twin fallback (see IanaTimeZone in the API project).</summary>
+    private static readonly Dictionary<string, string> RenameTwins = new()
+    {
+        ["Europe/Kyiv"] = "Europe/Kiev",
+        ["Europe/Kiev"] = "Europe/Kyiv",
+        ["America/Nuuk"] = "America/Godthab",
+        ["America/Godthab"] = "America/Nuuk",
+        ["Asia/Yangon"] = "Asia/Rangoon",
+        ["Asia/Rangoon"] = "Asia/Yangon",
+        ["Asia/Kolkata"] = "Asia/Calcutta",
+        ["Asia/Calcutta"] = "Asia/Kolkata",
+        ["Asia/Ho_Chi_Minh"] = "Asia/Saigon",
+        ["Asia/Saigon"] = "Asia/Ho_Chi_Minh",
+    };
 
     private async Task<ProfileDto> PutProfile(string initData, object body)
     {

@@ -208,6 +208,29 @@ public class LessonSeriesTests
     }
 
     [Fact]
+    public void MoveToTimeZone_KeepsWallClockAndShiftsUtc()
+    {
+        var series = CreateSeries();
+        var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+
+        series.MoveToTimeZone(newYork);
+
+        Assert.Equal("America/New_York", series.TimeZone.Id);
+        Assert.Equal(FourPm, series.StartTimeLocal);
+        // Same 16:00 wall clock, now on the New York calendar: UTC-4 in July -> 20:00 UTC.
+        var single = Assert.Single(series.GetOccurrences(StartDate, StartDate));
+        Assert.Equal(new DateTimeOffset(2026, 7, 6, 20, 0, 0, TimeSpan.Zero), single.StartUtc);
+    }
+
+    [Fact]
+    public void MoveToTimeZone_Null_Throws()
+    {
+        var series = CreateSeries();
+
+        Assert.Throws<ArgumentNullException>(() => series.MoveToTimeZone(null!));
+    }
+
+    [Fact]
     public void UpdateDetails_ReplacesEditableFields()
     {
         var series = CreateSeries();

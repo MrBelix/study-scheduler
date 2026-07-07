@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.API.Core.Time;
 using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Students;
 
@@ -116,7 +117,7 @@ internal static class Endpoints
             errors["Name"] = ["Name is required."];
         if (rate < 0)
             errors["Rate"] = ["Rate must be zero or positive."];
-        if (!string.IsNullOrWhiteSpace(timeZoneId) && !TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId.Trim(), out _))
+        if (!string.IsNullOrWhiteSpace(timeZoneId) && !IanaTimeZone.TryResolve(timeZoneId, out _))
             errors["TimeZoneId"] = ["Unknown time zone."];
 
         return errors.Count == 0 ? null : errors;
@@ -124,5 +125,5 @@ internal static class Endpoints
 
     /// <summary>Assumes the id already passed validation; blank means "no time zone".</summary>
     private static TimeZoneInfo? ParseTimeZone(string? timeZoneId) =>
-        string.IsNullOrWhiteSpace(timeZoneId) ? null : TimeZoneInfo.FindSystemTimeZoneById(timeZoneId.Trim());
+        IanaTimeZone.TryResolve(timeZoneId, out var timeZone) ? timeZone : null;
 }

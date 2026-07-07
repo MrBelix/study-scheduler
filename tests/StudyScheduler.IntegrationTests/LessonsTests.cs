@@ -456,6 +456,36 @@ public class LessonsTests(AppFixture app)
 
     // --- helpers ---
 
+    [Fact]
+    public async Task Changing_profile_zone_moves_profile_anchored_series_but_not_explicitly_anchored_ones()
+    {
+        var tutor = TelegramInitData.ForUser(3119, "Alice");
+        var student = await CreateStudent(tutor);
+        await SetProfile(tutor, "Europe/Kyiv");
+
+        var nineAm = new TimeOnly(9, 0);
+        // Anchored to the profile zone by default…
+        var followed = await CreateSeries(tutor, student.Id, BaseDate.AddDays(1), nineAm);
+        Assert.Equal("Europe/Kyiv", followed.TimeZoneId);
+        // …vs explicitly anchored elsewhere (e.g. the student's own zone).
+        var anchored = await CreateSeries(tutor, student.Id, BaseDate.AddDays(2), nineAm, timeZoneId: "Europe/Warsaw");
+        Assert.Equal("Europe/Warsaw", anchored.TimeZoneId);
+
+        await SetProfile(tutor, "America/New_York");
+
+        var followedAfter = await ReadAs<SeriesDto>(await app.Api.GetAs(tutor, $"/lessons/series/{followed.Id}"));
+        Assert.Equal("America/New_York", followedAfter.TimeZoneId);
+        Assert.Equal(nineAm, followedAfter.StartTimeLocal); // wall clock untouched
+
+        var anchoredAfter = await ReadAs<SeriesDto>(await app.Api.GetAs(tutor, $"/lessons/series/{anchored.Id}"));
+        Assert.Equal("Europe/Warsaw", anchoredAfter.TimeZoneId);
+
+        // Occurrences of the moved series now expand on the New York clock.
+        var lessons = await ListLessons(tutor, BaseUtc, BaseUtc.AddDays(7));
+        var occurrence = lessons.Single(l => l.SeriesId == followed.Id);
+        Assert.Equal(LocalToUtc(BaseDate.AddDays(1), nineAm, "America/New_York"), occurrence.StartUtc);
+    }
+
     private async Task<StudentDto> CreateStudent(string initData, decimal rate = 100m)
     {
         var response = await app.Api.PostAs(initData, "/students", new { name = "Kid", rate });
@@ -484,7 +514,12 @@ public class LessonsTests(AppFixture app)
     }
 
     private async Task<SeriesDto> CreateSeries(
-        string initData, Guid studentId, DateOnly startDate, TimeOnly startTimeLocal, DateOnly? endDate = null)
+        string initData,
+        Guid studentId,
+        DateOnly startDate,
+        TimeOnly startTimeLocal,
+        DateOnly? endDate = null,
+        string? timeZoneId = null)
     {
         var response = await app.Api.PostAs(initData, "/lessons/series", new
         {
@@ -494,6 +529,7 @@ public class LessonsTests(AppFixture app)
             startTimeLocal,
             durationMinutes = 60,
             endDate,
+            timeZoneId,
         });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return await ReadAs<SeriesDto>(response);

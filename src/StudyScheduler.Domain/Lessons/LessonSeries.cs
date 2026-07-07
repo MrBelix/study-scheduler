@@ -157,6 +157,17 @@ public sealed class LessonSeries : Entity
         End(DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(nowUtc, TimeZone).DateTime));
 
     /// <summary>
+    /// Moves the series to another time zone keeping the wall-clock schedule: a 16:00 lesson
+    /// stays at 16:00, now in <paramref name="timeZone"/> — the UTC instants of future
+    /// occurrences shift accordingly. Used when the tutor's profile zone changes.
+    /// </summary>
+    public void MoveToTimeZone(TimeZoneInfo timeZone)
+    {
+        ArgumentNullException.ThrowIfNull(timeZone);
+        TimeZone = timeZone;
+    }
+
+    /// <summary>
     /// Computes the concrete occurrences whose local date falls within
     /// <c>[fromLocal, toLocal]</c> (both inclusive), clipped to the series' own
     /// <c>[StartDate, EndDate]</c> window: every date whose weekday is in <see cref="Weekdays"/>.

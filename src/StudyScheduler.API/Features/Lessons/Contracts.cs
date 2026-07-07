@@ -13,9 +13,10 @@ public sealed record CreateLessonRequest(
 
 /// <summary>
 /// Request body for creating a recurring series. <c>Weekdays</c> is a flags combination
-/// (e.g. <c>"Monday, Thursday"</c>); times are the tutor's local wall clock (the time zone comes
-/// from the tutor profile); <c>EndDate</c> null makes the series open-ended. <c>Price</c> null
-/// falls back to the student's rate at materialization.
+/// (e.g. <c>"Monday, Thursday"</c>); <c>StartTimeLocal</c> is the wall clock in the series'
+/// anchor zone: <c>TimeZoneId</c> when set (e.g. the student's zone), otherwise the tutor's
+/// profile zone. <c>EndDate</c> null makes the series open-ended. <c>Price</c> null falls back
+/// to the student's rate at materialization.
 /// </summary>
 public sealed record CreateLessonSeriesRequest(
     Guid StudentId,
@@ -25,7 +26,8 @@ public sealed record CreateLessonSeriesRequest(
     TimeOnly StartTimeLocal,
     int DurationMinutes,
     DateOnly? EndDate,
-    decimal? Price);
+    decimal? Price,
+    string? TimeZoneId = null);
 
 /// <summary>
 /// Partial update — only non-null fields are applied. Cancelling is <c>Status = "Cancelled"</c>.

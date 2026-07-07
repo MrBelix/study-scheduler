@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.API.Core.Time;
+using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Tutors;
 
 namespace StudyScheduler.API.Features.Profile;
@@ -23,7 +25,12 @@ internal static class Endpoints
                 .Select(id => TimeZoneInfo.TryConvertWindowsIdToIanaId(id, out var ianaId) ? ianaId : null)
                 .OfType<string>();
 
-        return ids.Distinct().Order(StringComparer.Ordinal).ToList();
+        // Devices may detect a renamed spelling the host tzdata lacks ("Europe/Kyiv" vs
+        // "Europe/Kiev") — advertise both twins, TryResolve accepts either.
+        return IanaTimeZone.WithRenameTwins(ids.Distinct().ToList())
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .ToList();
     });
 
     /// <summary>
@@ -47,17 +54,18 @@ internal static class Endpoints
     /// <summary>
     /// Creates or updates the current tutor's profile (upsert). <c>LanguageCode</c> null leaves
     /// the stored language untouched, so time-zone-only and language-only saves don't clobber
-    /// each other.
+    /// each other. Changing the zone moves the active series anchored in the old profile zone
+    /// along with it (wall-clock preserved); series anchored elsewhere keep their own zone.
     /// </summary>
     public static async Task<Results<Ok<ProfileResponse>, ValidationProblem>> Put(
         ClaimsPrincipal principal,
         UpdateProfileRequest request,
         ITutorProfileRepository repo,
+        ILessonSeriesRepository seriesRepo,
         TimeProvider clock,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(request.TimeZoneId)
-            || !TimeZoneInfo.TryFindSystemTimeZoneById(request.TimeZoneId.Trim(), out var timeZone))
+        if (!IanaTimeZone.TryResolve(request.TimeZoneId, out var timeZone))
             return TypedResults.ValidationProblem(new Dictionary<string, string[]>
             {
                 ["TimeZoneId"] = ["A valid IANA time zone id is required (e.g. \"Europe/Kyiv\")."],
@@ -81,10 +89,21 @@ internal static class Endpoints
         }
         else
         {
+            var previousZone = profile.TimeZone;
             profile.UpdateTimeZone(timeZone);
             if (languageCode is not null)
                 profile.UpdateLanguage(languageCode);
             await repo.UpdateAsync(profile, ct);
+
+            if (previousZone.Id != timeZone.Id)
+            {
+                foreach (var series in await seriesRepo.GetActiveByTimeZoneAsync(
+                    principal.GetTelegramId(), previousZone, ct))
+                {
+                    series.MoveToTimeZone(timeZone);
+                    await seriesRepo.UpdateAsync(series, ct);
+                }
+            }
         }
 
         return TypedResults.Ok(ProfileResponse.From(profile));
