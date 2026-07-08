@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace StudyScheduler.API.Core.Authentication;
@@ -60,16 +61,28 @@ public sealed class TelegramAuthenticationHandler(
 
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
-        var code = _error switch
+        var (code, title) = _error switch
         {
-            TelegramAuthError.Expired => "expired",
-            TelegramAuthError.InvalidSignature => "invalid_signature",
-            TelegramAuthError.MissingData => "missing_data",
-            _ => "unauthorized",
+            TelegramAuthError.Expired => ("expired", "Telegram init data has expired."),
+            TelegramAuthError.InvalidSignature => ("invalid_signature", "Telegram init data signature is invalid."),
+            TelegramAuthError.MissingData => ("missing_data", "Telegram init data is missing or malformed."),
+            _ => ("unauthorized", "Authentication is required."),
         };
 
         Response.StatusCode = StatusCodes.Status401Unauthorized;
         Response.Headers.WWWAuthenticate = $"{TelegramAuthOptions.Scheme} error=\"{code}\"";
-        await Response.WriteAsJsonAsync(new { error = code });
+
+        // RFC 7807 body, aligned with every other API failure. The top-level "error" member is
+        // a ProblemDetails extension the frontend contract depends on: ApiError.fromResponse
+        // reads `body.error` as the machine code and flags "expired" as the auth-expired
+        // terminal state — it must survive any reshaping of this payload.
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status401Unauthorized,
+            Title = title,
+            Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+        };
+        problem.Extensions["error"] = code;
+        await Response.WriteAsJsonAsync(problem, options: null, contentType: "application/problem+json");
     }
 }

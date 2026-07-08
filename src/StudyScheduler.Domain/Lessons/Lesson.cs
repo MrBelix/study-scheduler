@@ -83,7 +83,7 @@ public sealed class Lesson : Entity
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
-    public static Lesson Create(
+    public static Result<Lesson> Create(
         long tutorTelegramId,
         Guid studentId,
         DateTimeOffset startUtc,
@@ -95,15 +95,26 @@ public sealed class Lesson : Entity
         Guid? seriesId = null,
         DateOnly? occurrenceDate = null)
     {
+        // Programmer errors, not user input: callers resolve these from auth / persisted data.
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tutorTelegramId);
         if (studentId == Guid.Empty)
             throw new ArgumentException("Student id is required.", nameof(studentId));
-        ValidateDuration(durationMinutes);
-        ArgumentOutOfRangeException.ThrowIfNegative(price);
         if (seriesId.HasValue != occurrenceDate.HasValue)
             throw new ArgumentException("SeriesId and OccurrenceDate must be provided together.", nameof(occurrenceDate));
 
-        return new Lesson(
+        var errors = new List<Error>();
+        if (ValidateDuration(durationMinutes) is { } durationError)
+            errors.Add(durationError);
+        if (ValidatePrice(price) is { } priceError)
+            errors.Add(priceError);
+        if (ValidateText(topic, MaxTopicLength, "Topic") is { } topicError)
+            errors.Add(topicError);
+        if (ValidateText(description, MaxDescriptionLength, "Description") is { } descriptionError)
+            errors.Add(descriptionError);
+        if (errors.Count > 0)
+            return Result<Lesson>.Failure([.. errors]);
+
+        return Result<Lesson>.Success(new Lesson(
             Guid.NewGuid(),
             tutorTelegramId,
             studentId,
@@ -111,61 +122,85 @@ public sealed class Lesson : Entity
             durationMinutes,
             price,
             createdAtUtc,
-            NormalizeText(topic, MaxTopicLength, nameof(topic)),
-            NormalizeText(description, MaxDescriptionLength, nameof(description)),
+            Normalize(topic),
+            Normalize(description),
             seriesId,
-            occurrenceDate);
+            occurrenceDate));
     }
 
-    public void Reschedule(DateTimeOffset startUtc, int durationMinutes)
+    public Result Reschedule(DateTimeOffset startUtc, int durationMinutes)
     {
-        ValidateDuration(durationMinutes);
+        if (ValidateDuration(durationMinutes) is { } error)
+            return Result.Failure(error);
 
         StartUtc = startUtc;
         DurationMinutes = durationMinutes;
         EndUtc = startUtc.AddMinutes(durationMinutes);
+        return Result.Success();
     }
 
-    public void ChangeStatus(LessonStatus status)
+    public Result ChangeStatus(LessonStatus status)
     {
+        // The API's JSON enum binding already constrains this, but the domain must not rely on
+        // one particular caller — an undefined value is reported, never silently stored.
         if (!Enum.IsDefined(status))
-            throw new ArgumentException($"Unknown lesson status '{status}'.", nameof(status));
+            return Result.Failure(new Error(
+                "Lesson.UnknownStatus", $"Unknown lesson status '{status}'.", "Status"));
 
         Status = status;
+        return Result.Success();
     }
 
-    public void SetPrice(decimal price)
+    public Result SetPrice(decimal price)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(price);
+        if (ValidatePrice(price) is { } error)
+            return Result.Failure(error);
+
         Price = price;
+        return Result.Success();
     }
 
     public void SetPaid(bool isPaid) => IsPaid = isPaid;
 
-    public void UpdateTopic(string? topic) =>
-        Topic = NormalizeText(topic, MaxTopicLength, nameof(topic));
-
-    public void UpdateDescription(string? description) =>
-        Description = NormalizeText(description, MaxDescriptionLength, nameof(description));
-
-    private static void ValidateDuration(int durationMinutes)
+    public Result UpdateTopic(string? topic)
     {
-        if (durationMinutes is < MinDurationMinutes or > MaxDurationMinutes)
-            throw new ArgumentOutOfRangeException(
-                nameof(durationMinutes),
-                durationMinutes,
-                $"Duration must be between {MinDurationMinutes} and {MaxDurationMinutes} minutes.");
+        if (ValidateText(topic, MaxTopicLength, "Topic") is { } error)
+            return Result.Failure(error);
+
+        Topic = Normalize(topic);
+        return Result.Success();
     }
 
-    private static string? NormalizeText(string? value, int maxLength, string paramName)
+    public Result UpdateDescription(string? description)
     {
-        if (string.IsNullOrWhiteSpace(value))
-            return null;
+        if (ValidateText(description, MaxDescriptionLength, "Description") is { } error)
+            return Result.Failure(error);
 
-        var trimmed = value.Trim();
-        if (trimmed.Length > maxLength)
-            throw new ArgumentException($"Must not exceed {maxLength} characters.", paramName);
-
-        return trimmed;
+        Description = Normalize(description);
+        return Result.Success();
     }
+
+    private static Error? ValidateDuration(int durationMinutes) =>
+        durationMinutes is < MinDurationMinutes or > MaxDurationMinutes
+            ? new Error(
+                "Lesson.DurationOutOfRange",
+                $"Duration must be between {MinDurationMinutes} and {MaxDurationMinutes} minutes.",
+                "DurationMinutes")
+            : null;
+
+    private static Error? ValidatePrice(decimal price) =>
+        price < 0
+            ? new Error("Lesson.NegativePrice", "Price must be zero or positive.", "Price")
+            : null;
+
+    // Message shape mirrors the API's historical ValidationProblem strings — the field name is
+    // part of the payload contract the frontend maps onto its form fields.
+    private static Error? ValidateText(string? value, int maxLength, string field) =>
+        value?.Trim().Length > maxLength
+            ? new Error(
+                $"Lesson.{field}TooLong", $"{field} must not exceed {maxLength} characters.", field)
+            : null;
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

@@ -18,6 +18,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\host\StudyScheduler.AppHost\StudyScheduler.AppHost.csproj" />
+    <!-- Direct reference (besides the Aspire resource one above) so repository-level tests can
+         open an AppDbContext against the containerized SQL Server. -->
+    <ProjectReference Include="..\..\src\StudyScheduler.API\StudyScheduler.API.csproj" />
   </ItemGroup>
 
   <ItemGroup>

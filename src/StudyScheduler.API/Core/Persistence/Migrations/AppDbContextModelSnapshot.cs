@@ -17,7 +17,7 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.8")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -83,6 +83,35 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                     b.HasIndex("TutorTelegramId", "StartUtc");
 
                     b.ToTable("Lessons", (string)null);
+                });
+
+            modelBuilder.Entity("StudyScheduler.Domain.Lessons.LessonNotification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTimeOffset>("SentAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SlotKey")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<long>("TutorTelegramId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TutorTelegramId", "Kind", "SlotKey")
+                        .IsUnique();
+
+                    b.ToTable("LessonNotifications", (string)null);
                 });
 
             modelBuilder.Entity("StudyScheduler.Domain.Lessons.LessonSeries", b =>
@@ -200,6 +229,12 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                     b.Property<string>("LanguageCode")
                         .HasMaxLength(2)
                         .HasColumnType("nvarchar(2)");
+
+                    b.Property<bool>("NotifyAfterLesson")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("RemindMinutes")
+                        .HasColumnType("int");
 
                     b.Property<string>("TimeZone")
                         .IsRequired()

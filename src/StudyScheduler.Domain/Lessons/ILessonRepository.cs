@@ -6,7 +6,12 @@ namespace StudyScheduler.Domain.Lessons;
 /// </summary>
 public interface ILessonRepository
 {
-    Task<Lesson?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    /// <summary>
+    /// The lesson with the given id owned by the tutor, or null — ownership is part of the
+    /// query, so cross-tenant ids look exactly like missing ones. Untracked unless
+    /// <paramref name="track"/> is set; pass <c>true</c> when the entity will be mutated.
+    /// </summary>
+    Task<Lesson?> GetByIdAsync(Guid id, long tutorTelegramId, bool track = false, CancellationToken ct = default);
 
     /// <summary>Lessons of the tutor intersecting <c>[fromUtc, toUtc)</c>, ordered by start.</summary>
     Task<List<Lesson>> GetByTutorInRangeAsync(
@@ -49,7 +54,9 @@ public interface ILessonRepository
         DateOnly occurrenceDate,
         CancellationToken ct = default);
 
-    Task AddAsync(Lesson lesson, CancellationToken ct = default);
+    /// <summary>Stages the lesson for insertion; nothing is written until <see cref="Primitives.IUnitOfWork.SaveChangesAsync"/>.</summary>
+    void Add(Lesson lesson);
 
-    Task UpdateAsync(Lesson lesson, CancellationToken ct = default);
+    /// <summary>Stages the lesson for update; nothing is written until <see cref="Primitives.IUnitOfWork.SaveChangesAsync"/>.</summary>
+    void Update(Lesson lesson);
 }

@@ -1,4 +1,5 @@
 using StudyScheduler.API.Core.RateLimiting;
+using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.Domain.Lessons;
 
 namespace StudyScheduler.API.Features.Lessons;
@@ -14,6 +15,10 @@ public static class LessonsModule
         services.AddScoped<ILessonRepository, EfLessonRepository>();
         services.AddScoped<ILessonSeriesRepository, EfLessonSeriesRepository>();
         services.AddScoped<LessonOverlapChecker>();
+        services.AddScoped<LessonPatchService>();
+        // Core/Scheduling machinery — registered here because Lessons is its primary consumer
+        // and always enabled; Notifications reuses the same scoped instances.
+        services.AddScoped<SeriesExpansion>();
         services.AddScoped<LessonMaterializer>();
         return services;
     }

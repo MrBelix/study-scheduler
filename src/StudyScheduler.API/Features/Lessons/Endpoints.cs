@@ -1,9 +1,11 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.EntityFrameworkCore;
 using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.API.Core.ErrorHandling;
+using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.API.Core.Time;
 using StudyScheduler.Domain.Lessons;
+using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Students;
 using StudyScheduler.Domain.Tutors;
 
@@ -30,7 +32,7 @@ internal static class Endpoints
             return TypedResults.ValidationProblem(errors);
 
         var schedule = await materializer.GetScheduleAsync(principal.GetTelegramId(), from, to, studentId, ct);
-        return TypedResults.Ok(schedule);
+        return TypedResults.Ok(schedule.Select(LessonResponse.From).ToList());
     }
 
     /// <summary>Returns a single lesson, scoped to the current tutor.</summary>
@@ -40,8 +42,8 @@ internal static class Endpoints
         ILessonRepository repo,
         CancellationToken ct)
     {
-        var lesson = await repo.GetByIdAsync(id, ct);
-        if (lesson is null || lesson.TutorTelegramId != principal.GetTelegramId())
+        var lesson = await repo.GetByIdAsync(id, principal.GetTelegramId(), ct: ct);
+        if (lesson is null)
             return TypedResults.NotFound();
 
         return TypedResults.Ok(LessonResponse.From(lesson));
@@ -54,29 +56,22 @@ internal static class Endpoints
         ILessonRepository repo,
         IStudentRepository studentRepo,
         LessonOverlapChecker overlapChecker,
+        IUnitOfWork uow,
         TimeProvider clock,
         CancellationToken ct)
     {
         var tutorId = principal.GetTelegramId();
 
-        var errors = new Dictionary<string, string[]>();
-        ValidateDuration(request.DurationMinutes, errors);
-        ValidatePrice(request.Price, errors);
-        ValidateText(request.Topic, Lesson.MaxTopicLength, "Topic", errors);
-        ValidateText(request.Description, Lesson.MaxDescriptionLength, "Description", errors);
-        if (errors.Count > 0)
-            return TypedResults.ValidationProblem(errors);
-
-        var student = await studentRepo.GetByIdAsync(request.StudentId, ct);
-        if (student is null || student.TutorTelegramId != tutorId)
+        // The student is resolved first: a missing price falls back to the student's rate, and
+        // an absent (or empty-Guid) StudentId must keep answering "Student not found" rather
+        // than tripping the factory's programmer-error guard.
+        var student = await studentRepo.GetByIdAsync(request.StudentId, tutorId, ct: ct);
+        if (student is null)
             return StudentNotFound();
 
-        var endUtc = request.StartUtc.AddMinutes(request.DurationMinutes);
-        var conflicts = await overlapChecker.CheckLessonAsync(tutorId, request.StartUtc, endUtc, ct: ct);
-        if (conflicts.Count > 0)
-            return Conflict(conflicts);
-
-        var lesson = Lesson.Create(
+        // The domain factory is the single validator of the lesson's own fields; it must run
+        // before the overlap check so invalid input never answers 409.
+        var created = Lesson.Create(
             tutorId,
             request.StudentId,
             request.StartUtc,
@@ -85,8 +80,17 @@ internal static class Endpoints
             clock.GetUtcNow(),
             request.Topic,
             request.Description);
+        if (!created.IsSuccess)
+            return created.ToValidationProblem();
+        var lesson = created.Value;
 
-        await repo.AddAsync(lesson, ct);
+        var endUtc = request.StartUtc.AddMinutes(request.DurationMinutes);
+        var conflicts = await overlapChecker.CheckLessonAsync(tutorId, request.StartUtc, endUtc, ct: ct);
+        if (conflicts.Count > 0)
+            return Conflict(conflicts);
+
+        repo.Add(lesson);
+        await uow.SaveChangesAsync(ct);
         return TypedResults.Created($"/lessons/{lesson.Id}", LessonResponse.From(lesson));
     }
 
@@ -100,17 +104,16 @@ internal static class Endpoints
         ClaimsPrincipal principal,
         UpdateLessonRequest request,
         ILessonRepository repo,
-        LessonOverlapChecker overlapChecker,
-        ILogger<LessonMaterializer> logger,
+        LessonPatchService patchService,
         CancellationToken ct)
     {
         var tutorId = principal.GetTelegramId();
 
-        var lesson = await repo.GetByIdAsync(id, ct);
-        if (lesson is null || lesson.TutorTelegramId != tutorId)
+        var lesson = await repo.GetByIdAsync(id, tutorId, track: true, ct);
+        if (lesson is null)
             return TypedResults.NotFound();
 
-        return await ApplyPatchAsync(lesson, request, tutorId, repo, overlapChecker, logger, isNew: false, ct: ct);
+        return ToHttpResult(await patchService.ApplyAsync(lesson, request, tutorId, isNew: false, ct: ct));
     }
 
     /// <summary>
@@ -127,20 +130,19 @@ internal static class Endpoints
         ILessonSeriesRepository seriesRepo,
         ILessonRepository repo,
         LessonMaterializer materializer,
-        LessonOverlapChecker overlapChecker,
-        ILogger<LessonMaterializer> logger,
+        LessonPatchService patchService,
         CancellationToken ct)
     {
         var tutorId = principal.GetTelegramId();
 
-        var series = await seriesRepo.GetByIdAsync(seriesId, ct);
-        if (series is null || series.TutorTelegramId != tutorId)
+        var series = await seriesRepo.GetByIdAsync(seriesId, tutorId, ct: ct);
+        if (series is null)
             return TypedResults.NotFound();
 
         // Already materialized — behave exactly like PATCH /lessons/{id}.
         var existing = await repo.GetBySeriesOccurrenceAsync(seriesId, occurrenceDate, ct);
         if (existing is not null)
-            return await ApplyPatchAsync(existing, request, tutorId, repo, overlapChecker, logger, isNew: false, ct: ct);
+            return ToHttpResult(await patchService.ApplyAsync(existing, request, tutorId, isNew: false, ct: ct));
 
         // The date must be an actual virtual slot of the series (weekday + date window).
         if (!series.IsActive)
@@ -150,92 +152,23 @@ internal static class Endpoints
             return TypedResults.NotFound();
 
         var lesson = await materializer.MaterializeSlotAsync(series, slot[0], ct);
-        return await ApplyPatchAsync(
-            lesson, request, tutorId, repo, overlapChecker, logger, isNew: true,
-            excludeOccurrence: (seriesId, occurrenceDate), ct: ct);
+        return ToHttpResult(await patchService.ApplyAsync(
+            lesson, request, tutorId, isNew: true,
+            excludeOccurrence: (seriesId, occurrenceDate), ct: ct));
     }
 
-    /// <summary>
-    /// Shared patch pipeline for physical lessons and freshly materialized slots: validate, check
-    /// overlaps when the time actually changes (or the lesson is un-cancelled), apply, save.
-    /// <paramref name="excludeOccurrence"/> keeps a just-materialized slot from conflicting with
-    /// its own series occurrence (the row is not persisted yet, so the checker would otherwise
-    /// still see the slot as an unmaterialized occurrence).
-    /// </summary>
-    private static async Task<Results<Ok<LessonResponse>, NotFound, ValidationProblem, Conflict<LessonConflictResponse>>> ApplyPatchAsync(
-        Lesson lesson,
-        UpdateLessonRequest request,
-        long tutorId,
-        ILessonRepository repo,
-        LessonOverlapChecker overlapChecker,
-        ILogger logger,
-        bool isNew,
-        (Guid SeriesId, DateOnly OccurrenceDate)? excludeOccurrence = null,
-        CancellationToken ct = default)
-    {
-        var startUtc = request.StartUtc ?? lesson.StartUtc;
-        var durationMinutes = request.DurationMinutes ?? lesson.DurationMinutes;
-        var status = request.Status ?? lesson.Status;
-
-        var errors = new Dictionary<string, string[]>();
-        ValidateDuration(durationMinutes, errors);
-        ValidatePrice(request.Price, errors);
-        ValidateText(request.Topic, Lesson.MaxTopicLength, "Topic", errors);
-        ValidateText(request.Description, Lesson.MaxDescriptionLength, "Description", errors);
-        if (errors.Count > 0)
-            return TypedResults.ValidationProblem(errors);
-
-        var timeChanged = startUtc != lesson.StartUtc || durationMinutes != lesson.DurationMinutes;
-        var unCancelling = lesson.Status == LessonStatus.Cancelled && status != LessonStatus.Cancelled;
-        if (status != LessonStatus.Cancelled && (timeChanged || unCancelling))
+    /// <summary>Maps the patch pipeline's outcome onto the endpoints' HTTP result union.</summary>
+    private static Results<Ok<LessonResponse>, NotFound, ValidationProblem, Conflict<LessonConflictResponse>> ToHttpResult(
+        LessonPatchOutcome outcome) =>
+        outcome switch
         {
-            var conflicts = await overlapChecker.CheckLessonAsync(
-                tutorId, startUtc, startUtc.AddMinutes(durationMinutes),
-                excludeLessonId: lesson.Id, excludeOccurrence: excludeOccurrence, ct: ct);
-            if (conflicts.Count > 0)
-                return Conflict(conflicts);
-        }
-
-        if (timeChanged)
-            lesson.Reschedule(startUtc, durationMinutes);
-        if (request.Status is { } newStatus)
-            lesson.ChangeStatus(newStatus);
-        if (request.Price is { } price)
-            lesson.SetPrice(price);
-        if (request.IsPaid is { } isPaid)
-            lesson.SetPaid(isPaid);
-        if (request.Topic is not null)
-            lesson.UpdateTopic(request.Topic);
-        if (request.Description is not null)
-            lesson.UpdateDescription(request.Description);
-
-        if (isNew)
-        {
-            try
-            {
-                await repo.AddAsync(lesson, ct);
-            }
-            catch (DbUpdateException exception)
-            {
-                // A concurrent request materialized the same slot first — the unique
-                // (SeriesId, OccurrenceDate) index rejected the insert. Let the client retry;
-                // the retry will hit the physical row and apply as a plain update.
-                logger.LogWarning(
-                    exception,
-                    "Concurrent materialization of occurrence {OccurrenceDate} in series {SeriesId} detected; returning 409",
-                    lesson.OccurrenceDate, lesson.SeriesId);
-
-                return TypedResults.Conflict(new LessonConflictResponse(
-                    "The slot was modified concurrently. Retry the request.", []));
-            }
-        }
-        else
-        {
-            await repo.UpdateAsync(lesson, ct);
-        }
-
-        return TypedResults.Ok(LessonResponse.From(lesson));
-    }
+            LessonPatchOutcome.Ok ok => TypedResults.Ok(LessonResponse.From(ok.Lesson)),
+            LessonPatchOutcome.Validation validation => validation.Failure.ToValidationProblem(),
+            LessonPatchOutcome.Conflict conflict => Conflict(conflict.Conflicts),
+            LessonPatchOutcome.ConcurrentMaterialization => TypedResults.Conflict(new LessonConflictResponse(
+                "The slot was modified concurrently. Retry the request.", [])),
+            _ => throw new InvalidOperationException($"Unhandled patch outcome '{outcome.GetType().Name}'."),
+        };
 
     /// <summary>Lists the current tutor's series (active and cancelled).</summary>
     public static async Task<Ok<List<LessonSeriesResponse>>> GetSeriesList(
@@ -254,8 +187,8 @@ internal static class Endpoints
         ILessonSeriesRepository repo,
         CancellationToken ct)
     {
-        var series = await repo.GetByIdAsync(seriesId, ct);
-        if (series is null || series.TutorTelegramId != principal.GetTelegramId())
+        var series = await repo.GetByIdAsync(seriesId, principal.GetTelegramId(), ct: ct);
+        if (series is null)
             return TypedResults.NotFound();
 
         return TypedResults.Ok(LessonSeriesResponse.From(series));
@@ -275,14 +208,16 @@ internal static class Endpoints
         IStudentRepository studentRepo,
         ITutorProfileRepository profileRepo,
         LessonOverlapChecker overlapChecker,
+        IUnitOfWork uow,
         TimeProvider clock,
         CancellationToken ct)
     {
         var tutorId = principal.GetTelegramId();
 
+        // Endpoint-level checks that are not single-aggregate invariants: request weekdays get a
+        // friendlier example-bearing message, and the time zone id is an HTTP-contract concern
+        // (the domain receives an already-resolved TimeZoneInfo).
         var errors = new Dictionary<string, string[]>();
-        ValidateDuration(request.DurationMinutes, errors);
-        ValidatePrice(request.Price, errors);
         if (!request.Weekdays.IsValidSet())
             errors["Weekdays"] = ["At least one weekday is required (e.g. \"Monday, Thursday\")."];
         if (request.EndDate is { } endDate && endDate < request.StartDate)
@@ -300,11 +235,13 @@ internal static class Endpoints
                 ["Profile"] = ["Set your time zone first via PUT /profile — series times are defined in it."],
             });
 
-        var student = await studentRepo.GetByIdAsync(request.StudentId, ct);
-        if (student is null || student.TutorTelegramId != tutorId)
+        var student = await studentRepo.GetByIdAsync(request.StudentId, tutorId, ct: ct);
+        if (student is null)
             return StudentNotFound();
 
-        var series = LessonSeries.Create(
+        // Field invariants (duration, price, ...) are the domain factory's job; it must run
+        // before the overlap check so invalid input never answers 409.
+        var created = LessonSeries.Create(
             tutorId,
             request.StudentId,
             request.StartDate,
@@ -316,12 +253,16 @@ internal static class Endpoints
             request.Title,
             request.EndDate,
             request.Price);
+        if (!created.IsSuccess)
+            return created.ToValidationProblem();
+        var series = created.Value;
 
         var conflicts = await overlapChecker.CheckSeriesAsync(series, ct);
         if (conflicts.Count > 0)
             return Conflict(conflicts);
 
-        await repo.AddAsync(series, ct);
+        repo.Add(series);
+        await uow.SaveChangesAsync(ct);
         return TypedResults.Created($"/lessons/series/{series.Id}", LessonSeriesResponse.From(series));
     }
 
@@ -336,27 +277,26 @@ internal static class Endpoints
         ClaimsPrincipal principal,
         UpdateLessonSeriesRequest request,
         ILessonSeriesRepository repo,
+        IUnitOfWork uow,
         CancellationToken ct)
     {
         var tutorId = principal.GetTelegramId();
 
-        var series = await repo.GetByIdAsync(seriesId, ct);
-        if (series is null || series.TutorTelegramId != tutorId)
+        var series = await repo.GetByIdAsync(seriesId, tutorId, track: true, ct);
+        if (series is null)
             return TypedResults.NotFound();
 
-        var endDate = request.EndDate ?? series.EndDate;
-        var errors = new Dictionary<string, string[]>();
-        ValidatePrice(request.Price, errors);
-        if (endDate is { } end && end < series.StartDate)
-            errors["EndDate"] = ["End date must not precede start date."];
-        if (errors.Count > 0)
-            return TypedResults.ValidationProblem(errors);
-
-        series.UpdateDetails(
+        // The domain validates the merged fields (end date vs the series' own start date,
+        // price) and reports failures before anything is staged for save.
+        var updated = series.UpdateDetails(
             request.Title ?? series.Title,
-            endDate,
+            request.EndDate ?? series.EndDate,
             request.Price ?? series.Price);
-        await repo.UpdateAsync(series, ct);
+        if (!updated.IsSuccess)
+            return updated.ToValidationProblem();
+
+        repo.Update(series);
+        await uow.SaveChangesAsync(ct);
 
         return TypedResults.Ok(LessonSeriesResponse.From(series));
     }
@@ -370,17 +310,19 @@ internal static class Endpoints
         Guid seriesId,
         ClaimsPrincipal principal,
         ILessonSeriesRepository repo,
+        IUnitOfWork uow,
         TimeProvider clock,
         CancellationToken ct)
     {
         var tutorId = principal.GetTelegramId();
 
-        var series = await repo.GetByIdAsync(seriesId, ct);
-        if (series is null || series.TutorTelegramId != tutorId)
+        var series = await repo.GetByIdAsync(seriesId, tutorId, track: true, ct);
+        if (series is null)
             return TypedResults.NotFound();
 
         series.EndAsOf(clock.GetUtcNow());
-        await repo.UpdateAsync(series, ct);
+        repo.Update(series);
+        await uow.SaveChangesAsync(ct);
 
         return TypedResults.Ok(LessonSeriesResponse.From(series));
     }
@@ -394,25 +336,6 @@ internal static class Endpoints
             errors["To"] = [$"Range must not exceed {MaxRangeDays} days."];
 
         return errors.Count == 0 ? null : errors;
-    }
-
-    private static void ValidateDuration(int durationMinutes, Dictionary<string, string[]> errors)
-    {
-        if (durationMinutes is < Lesson.MinDurationMinutes or > Lesson.MaxDurationMinutes)
-            errors["DurationMinutes"] =
-                [$"Duration must be between {Lesson.MinDurationMinutes} and {Lesson.MaxDurationMinutes} minutes."];
-    }
-
-    private static void ValidatePrice(decimal? price, Dictionary<string, string[]> errors)
-    {
-        if (price is < 0)
-            errors["Price"] = ["Price must be zero or positive."];
-    }
-
-    private static void ValidateText(string? value, int maxLength, string field, Dictionary<string, string[]> errors)
-    {
-        if (value?.Trim().Length > maxLength)
-            errors[field] = [$"{field} must not exceed {maxLength} characters."];
     }
 
     // Same message whether the student does not exist or belongs to another tutor — existence

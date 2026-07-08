@@ -11,7 +11,7 @@ public class TutorProfileTests
     [Fact]
     public void Create_ValidInput_SetsFields()
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt);
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
 
         Assert.Equal(555, profile.TelegramUserId);
         Assert.Equal("Europe/Kyiv", profile.TimeZone.Id);
@@ -35,7 +35,7 @@ public class TutorProfileTests
     [Fact]
     public void UpdateTimeZone_Valid_Replaces()
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt);
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
 
         profile.UpdateTimeZone(TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw"));
 
@@ -45,7 +45,7 @@ public class TutorProfileTests
     [Fact]
     public void UpdateTimeZone_Null_Throws()
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt);
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
 
         Assert.Throws<ArgumentNullException>(() => profile.UpdateTimeZone(null!));
     }
@@ -53,7 +53,7 @@ public class TutorProfileTests
     [Fact]
     public void Create_WithoutLanguage_LeavesItNull()
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt);
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
 
         Assert.Null(profile.LanguageCode);
     }
@@ -61,18 +61,30 @@ public class TutorProfileTests
     [Fact]
     public void Create_WithLanguage_NormalizesToLowerCase()
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: " UK ");
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: " UK ").Value;
 
         Assert.Equal("uk", profile.LanguageCode);
     }
 
     [Fact]
+    public void Create_WithInvalidLanguage_Fails()
+    {
+        var result = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: "ukr");
+
+        Assert.False(result.IsSuccess);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("LanguageCode", error.Field);
+        Assert.Equal("Profile.InvalidLanguageCode", error.Code);
+    }
+
+    [Fact]
     public void UpdateLanguage_Valid_Replaces()
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: "uk");
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: "uk").Value;
 
-        profile.UpdateLanguage("en");
+        var result = profile.UpdateLanguage("en");
 
+        Assert.True(result.IsSuccess);
         Assert.Equal("en", profile.LanguageCode);
     }
 
@@ -83,10 +95,65 @@ public class TutorProfileTests
     [InlineData("ukr")]
     [InlineData("u1")]
     [InlineData("u-")]
-    public void UpdateLanguage_NotTwoLetters_Throws(string code)
+    public void UpdateLanguage_NotTwoLetters_FailsWithoutMutating(string code)
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt);
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
 
-        Assert.Throws<ArgumentException>(() => profile.UpdateLanguage(code));
+        var result = profile.UpdateLanguage(code);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("LanguageCode", Assert.Single(result.Errors).Field);
+        Assert.Null(profile.LanguageCode);
+    }
+
+    [Fact]
+    public void Create_NotificationsOnByDefault()
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
+
+        Assert.Equal(TutorProfile.DefaultRemindMinutes, profile.RemindMinutes);
+        Assert.True(profile.NotifyAfterLesson);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(TutorProfile.MinRemindMinutes)]
+    [InlineData(60)]
+    [InlineData(TutorProfile.MaxRemindMinutes)]
+    public void UpdateRemindMinutes_ValidOrOff_Replaces(int? minutes)
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
+
+        var result = profile.UpdateRemindMinutes(minutes);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(minutes, profile.RemindMinutes);
+    }
+
+    [Theory]
+    [InlineData(TutorProfile.MinRemindMinutes - 1)]
+    [InlineData(TutorProfile.MaxRemindMinutes + 1)]
+    [InlineData(0)]
+    public void UpdateRemindMinutes_OutOfRange_FailsWithoutMutating(int minutes)
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
+
+        var result = profile.UpdateRemindMinutes(minutes);
+
+        Assert.False(result.IsSuccess);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("RemindMinutes", error.Field);
+        Assert.Equal("Profile.RemindMinutesOutOfRange", error.Code);
+        Assert.Equal(TutorProfile.DefaultRemindMinutes, profile.RemindMinutes);
+    }
+
+    [Fact]
+    public void UpdateNotifyAfterLesson_Replaces()
+    {
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
+
+        profile.UpdateNotifyAfterLesson(false);
+
+        Assert.False(profile.NotifyAfterLesson);
     }
 }

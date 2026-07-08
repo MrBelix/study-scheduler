@@ -77,7 +77,7 @@ public sealed class LessonSeries : Entity
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
-    public static LessonSeries Create(
+    public static Result<LessonSeries> Create(
         long tutorTelegramId,
         Guid studentId,
         DateOnly startDate,
@@ -90,23 +90,29 @@ public sealed class LessonSeries : Entity
         DateOnly? endDate = null,
         decimal? price = null)
     {
+        // Programmer errors, not user input: callers resolve these from auth / persisted data.
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tutorTelegramId);
         ArgumentNullException.ThrowIfNull(timeZone);
         if (studentId == Guid.Empty)
             throw new ArgumentException("Student id is required.", nameof(studentId));
-        if (!weekdays.IsValidSet())
-            throw new ArgumentException("At least one valid weekday is required.", nameof(weekdays));
-        if (durationMinutes is < Lesson.MinDurationMinutes or > Lesson.MaxDurationMinutes)
-            throw new ArgumentOutOfRangeException(
-                nameof(durationMinutes),
-                durationMinutes,
-                $"Duration must be between {Lesson.MinDurationMinutes} and {Lesson.MaxDurationMinutes} minutes.");
-        if (endDate is { } end && end < startDate)
-            throw new ArgumentException("End date must not precede start date.", nameof(endDate));
-        if (price is { } p)
-            ArgumentOutOfRangeException.ThrowIfNegative(p);
 
-        return new LessonSeries(
+        var errors = new List<Error>();
+        if (!weekdays.IsValidSet())
+            errors.Add(new Error(
+                "LessonSeries.InvalidWeekdays", "At least one valid weekday is required.", "Weekdays"));
+        if (durationMinutes is < Lesson.MinDurationMinutes or > Lesson.MaxDurationMinutes)
+            errors.Add(new Error(
+                "LessonSeries.DurationOutOfRange",
+                $"Duration must be between {Lesson.MinDurationMinutes} and {Lesson.MaxDurationMinutes} minutes.",
+                "DurationMinutes"));
+        if (ValidateEndDate(endDate, startDate) is { } endDateError)
+            errors.Add(endDateError);
+        if (ValidatePrice(price) is { } priceError)
+            errors.Add(priceError);
+        if (errors.Count > 0)
+            return Result<LessonSeries>.Failure([.. errors]);
+
+        return Result<LessonSeries>.Success(new LessonSeries(
             Guid.NewGuid(),
             tutorTelegramId,
             studentId,
@@ -118,20 +124,24 @@ public sealed class LessonSeries : Entity
             durationMinutes,
             timeZone,
             price,
-            createdAtUtc);
+            createdAtUtc));
     }
 
     /// <summary>Replaces the editable fields. Changing the weekdays/time means cancel + recreate.</summary>
-    public void UpdateDetails(string? title, DateOnly? endDate, decimal? price)
+    public Result UpdateDetails(string? title, DateOnly? endDate, decimal? price)
     {
-        if (endDate is { } end && end < StartDate)
-            throw new ArgumentException("End date must not precede start date.", nameof(endDate));
-        if (price is { } p)
-            ArgumentOutOfRangeException.ThrowIfNegative(p);
+        var errors = new List<Error>();
+        if (ValidateEndDate(endDate, StartDate) is { } endDateError)
+            errors.Add(endDateError);
+        if (ValidatePrice(price) is { } priceError)
+            errors.Add(priceError);
+        if (errors.Count > 0)
+            return Result.Failure([.. errors]);
 
         Title = Normalize(title);
         EndDate = endDate;
         Price = price;
+        return Result.Success();
     }
 
     /// <summary>
@@ -197,6 +207,17 @@ public sealed class LessonSeries : Entity
 
         return occurrences;
     }
+
+    private static Error? ValidateEndDate(DateOnly? endDate, DateOnly startDate) =>
+        endDate is { } end && end < startDate
+            ? new Error(
+                "LessonSeries.EndDateBeforeStartDate", "End date must not precede start date.", "EndDate")
+            : null;
+
+    private static Error? ValidatePrice(decimal? price) =>
+        price is < 0
+            ? new Error("LessonSeries.NegativePrice", "Price must be zero or positive.", "Price")
+            : null;
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

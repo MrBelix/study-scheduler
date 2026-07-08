@@ -10,6 +10,8 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
+        <!-- Direct pin: transitive Microsoft.OpenApi 2.0.0 from Microsoft.AspNetCore.OpenApi has GHSA-v5pm-xwqc-g5wc -->
+        <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
         <PackageReference Include="Scalar.AspNetCore" Version="2.14.14" />
         <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.8" />
         <PackageReference Include="Aspire.Microsoft.EntityFrameworkCore.SqlServer" Version="13.4.6" />

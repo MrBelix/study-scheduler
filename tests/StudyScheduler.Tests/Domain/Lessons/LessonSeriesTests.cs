@@ -1,4 +1,5 @@
 using StudyScheduler.Domain.Lessons;
+using StudyScheduler.Domain.Primitives;
 using Xunit;
 
 namespace StudyScheduler.Tests.Domain.Lessons;
@@ -14,6 +15,14 @@ public class LessonSeriesTests
     private static readonly TimeOnly FourPm = new(16, 0);
 
     private static LessonSeries CreateSeries(
+        Weekdays weekdays = Weekdays.Monday,
+        DateOnly? endDate = null,
+        TimeZoneInfo? timeZone = null,
+        TimeOnly? startTime = null,
+        DateOnly? startDate = null) =>
+        CreateSeriesResult(weekdays, endDate, timeZone, startTime, startDate).Value;
+
+    private static Result<LessonSeries> CreateSeriesResult(
         Weekdays weekdays = Weekdays.Monday,
         DateOnly? endDate = null,
         TimeZoneInfo? timeZone = null,
@@ -51,9 +60,14 @@ public class LessonSeriesTests
     }
 
     [Fact]
-    public void Create_EndDateBeforeStartDate_Throws()
+    public void Create_EndDateBeforeStartDate_Fails()
     {
-        Assert.Throws<ArgumentException>(() => CreateSeries(endDate: StartDate.AddDays(-1)));
+        var result = CreateSeriesResult(endDate: StartDate.AddDays(-1));
+
+        Assert.False(result.IsSuccess);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("EndDate", error.Field);
+        Assert.Equal("LessonSeries.EndDateBeforeStartDate", error.Code);
     }
 
     [Fact]
@@ -66,16 +80,26 @@ public class LessonSeriesTests
     [Theory]
     [InlineData(Weekdays.None)]
     [InlineData((Weekdays)(1 << 7))] // a bit outside All
-    public void Create_InvalidWeekdays_Throws(Weekdays weekdays)
+    public void Create_InvalidWeekdays_Fails(Weekdays weekdays)
     {
-        Assert.Throws<ArgumentException>(() => CreateSeries(weekdays: weekdays));
+        var result = CreateSeriesResult(weekdays: weekdays);
+
+        Assert.False(result.IsSuccess);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("Weekdays", error.Field);
+        Assert.Equal("LessonSeries.InvalidWeekdays", error.Code);
     }
 
     [Fact]
-    public void Create_NegativePrice_Throws()
+    public void Create_NegativePrice_Fails()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => LessonSeries.Create(
-            555, StudentId, StartDate, Weekdays.Monday, FourPm, 60, Kyiv, CreatedAt, price: -1m));
+        var result = LessonSeries.Create(
+            555, StudentId, StartDate, Weekdays.Monday, FourPm, 60, Kyiv, CreatedAt, price: -1m);
+
+        Assert.False(result.IsSuccess);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("Price", error.Field);
+        Assert.Equal("LessonSeries.NegativePrice", error.Code);
     }
 
     [Fact]
@@ -235,19 +259,25 @@ public class LessonSeriesTests
     {
         var series = CreateSeries();
 
-        series.UpdateDetails("  Physics  ", StartDate.AddDays(14), 300m);
+        var result = series.UpdateDetails("  Physics  ", StartDate.AddDays(14), 300m);
 
+        Assert.True(result.IsSuccess);
         Assert.Equal("Physics", series.Title);
         Assert.Equal(StartDate.AddDays(14), series.EndDate);
         Assert.Equal(300m, series.Price);
     }
 
     [Fact]
-    public void UpdateDetails_EndDateBeforeStartDate_Throws()
+    public void UpdateDetails_EndDateBeforeStartDate_FailsWithoutMutating()
     {
         var series = CreateSeries();
 
-        Assert.Throws<ArgumentException>(() => series.UpdateDetails(null, StartDate.AddDays(-7), null));
+        var result = series.UpdateDetails(null, StartDate.AddDays(-7), null);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("EndDate", Assert.Single(result.Errors).Field);
+        Assert.Equal("Math", series.Title);
+        Assert.Null(series.EndDate);
     }
 
     [Fact]

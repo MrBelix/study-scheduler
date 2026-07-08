@@ -70,6 +70,31 @@ public class ProfileTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Notification_settings_default_on_and_survive_partial_saves()
+    {
+        var tutor = TelegramInitData.ForUser(3205, "Alice");
+
+        // First save creates the profile with notifications on by default.
+        var created = await PutProfile(tutor, new { timeZoneId = "Europe/Kyiv" });
+        Assert.Equal(30, created.RemindMinutes);
+        Assert.True(created.NotifyAfterLesson);
+
+        // Explicit settings save: 0 turns reminders off, follow-up off too.
+        var disabled = await PutProfile(tutor, new { timeZoneId = "Europe/Kyiv", remindMinutes = 0, notifyAfterLesson = false });
+        Assert.Null(disabled.RemindMinutes);
+        Assert.False(disabled.NotifyAfterLesson);
+
+        // A timezone-only save must not touch the notification settings…
+        var zoneOnly = await PutProfile(tutor, new { timeZoneId = "Europe/Warsaw" });
+        Assert.Null(zoneOnly.RemindMinutes);
+        Assert.False(zoneOnly.NotifyAfterLesson);
+
+        // …and an out-of-range lead time is rejected.
+        var invalid = await app.Api.PutAs(tutor, "/profile", new { timeZoneId = "Europe/Warsaw", remindMinutes = 3 });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
     public async Task Timezones_advertises_both_spellings_of_renamed_zones_and_put_accepts_either()
     {
         var tutor = TelegramInitData.ForUser(3204, "Alice");
@@ -122,5 +147,10 @@ public class ProfileTests(AppFixture app)
         return (await response.Content.ReadFromJsonAsync<ProfileDto>())!;
     }
 
-    private sealed record ProfileDto(string TimeZoneId, string? LanguageCode, DateTimeOffset CreatedAtUtc);
+    private sealed record ProfileDto(
+        string TimeZoneId,
+        string? LanguageCode,
+        int? RemindMinutes,
+        bool NotifyAfterLesson,
+        DateTimeOffset CreatedAtUtc);
 }

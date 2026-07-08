@@ -6,7 +6,12 @@ namespace StudyScheduler.Domain.Students;
 /// </summary>
 public interface IStudentRepository
 {
-    Task<Student?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    /// <summary>
+    /// The student with the given id owned by the tutor, or null — ownership is part of the
+    /// query, so cross-tenant ids look exactly like missing ones. Untracked unless
+    /// <paramref name="track"/> is set; pass <c>true</c> when the entity will be mutated.
+    /// </summary>
+    Task<Student?> GetByIdAsync(Guid id, long tutorTelegramId, bool track = false, CancellationToken ct = default);
 
     /// <summary>
     /// Students with the given ids, scoped to the tutor, in one round trip.
@@ -19,7 +24,9 @@ public interface IStudentRepository
 
     Task<List<Student>> GetAllByTutorIdAsync(long tutorTelegramId, CancellationToken ct = default);
 
-    Task AddAsync(Student student, CancellationToken ct = default);
+    /// <summary>Stages the student for insertion; nothing is written until <see cref="Primitives.IUnitOfWork.SaveChangesAsync"/>.</summary>
+    void Add(Student student);
 
-    Task UpdateAsync(Student student, CancellationToken ct = default);
+    /// <summary>Stages the student for update; nothing is written until <see cref="Primitives.IUnitOfWork.SaveChangesAsync"/>.</summary>
+    void Update(Student student);
 }

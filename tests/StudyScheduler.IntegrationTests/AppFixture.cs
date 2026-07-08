@@ -1,5 +1,7 @@
 using Aspire.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using StudyScheduler.API.Core.Persistence;
 
 namespace StudyScheduler.IntegrationTests;
 
@@ -12,6 +14,17 @@ public sealed class AppFixture : IAsyncLifetime
     private DistributedApplication? _app;
 
     public HttpClient Api { get; private set; } = null!;
+
+    private string _dbConnectionString = null!;
+
+    /// <summary>
+    /// A standalone <see cref="AppDbContext"/> against the containerized database, for tests
+    /// that exercise repository/EF behavior the HTTP surface can't reach (e.g. index races).
+    /// </summary>
+    public AppDbContext CreateDbContext() =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_dbConnectionString)
+            .Options);
 
     public async Task InitializeAsync()
     {
@@ -30,6 +43,9 @@ public sealed class AppFixture : IAsyncLifetime
         await _app.ResourceNotifications
             .WaitForResourceHealthyAsync("api")
             .WaitAsync(TimeSpan.FromMinutes(8));
+
+        _dbConnectionString = await _app.GetConnectionStringAsync("Default")
+            ?? throw new InvalidOperationException("Database connection string not available.");
 
         // Talk to the API's HTTPS endpoint but skip cert validation: the ASP.NET dev cert isn't
         // trusted on CI (Linux) runners, which otherwise fails the TLS handshake. Fine for tests.

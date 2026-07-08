@@ -1,3 +1,4 @@
+using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.Domain.Lessons;
 
 namespace StudyScheduler.API.Features.Lessons;
@@ -85,22 +86,22 @@ public sealed record LessonResponse(
         IsVirtual: false,
         lesson.CreatedAtUtc);
 
-    /// <summary>An unmaterialized series slot, generated in memory for the requested range.</summary>
-    public static LessonResponse Virtual(LessonSeries series, LessonOccurrence occurrence, decimal price) => new(
-        Id: null,
-        series.StudentId,
-        series.Id,
-        occurrence.OccurrenceDate,
-        occurrence.StartUtc,
-        occurrence.EndUtc,
-        series.DurationMinutes,
-        LessonStatus.Scheduled,
-        price,
-        IsPaid: false,
-        Topic: null,
-        Description: null,
-        IsVirtual: true,
-        series.CreatedAtUtc);
+    /// <summary>Maps the internal schedule projection 1:1 — the wire shape must not change.</summary>
+    public static LessonResponse From(ScheduleSlot slot) => new(
+        slot.Id,
+        slot.StudentId,
+        slot.SeriesId,
+        slot.OccurrenceDate,
+        slot.StartUtc,
+        slot.EndUtc,
+        slot.DurationMinutes,
+        slot.Status,
+        slot.Price,
+        slot.IsPaid,
+        slot.Topic,
+        slot.Description,
+        slot.IsVirtual,
+        slot.CreatedAtUtc);
 }
 
 /// <summary>Series projection returned to the client.</summary>

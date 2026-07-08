@@ -16,6 +16,8 @@ internal sealed class TutorProfileConfiguration : IEntityTypeConfiguration<Tutor
 
         builder.Property(p => p.TimeZone).IsRequired().HasColumnName("TimeZoneId").HasTimeZoneConversion();
         builder.Property(p => p.LanguageCode).HasMaxLength(2);
+        builder.Property(p => p.RemindMinutes);
+        builder.Property(p => p.NotifyAfterLesson);
         builder.Property(p => p.CreatedAtUtc);
     }
 }

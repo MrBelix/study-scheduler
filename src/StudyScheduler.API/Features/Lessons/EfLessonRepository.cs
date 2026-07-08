@@ -7,8 +7,15 @@ namespace StudyScheduler.API.Features.Lessons;
 /// <summary>EF Core implementation of <see cref="ILessonRepository"/> (SQL Server).</summary>
 public sealed class EfLessonRepository(AppDbContext db) : ILessonRepository
 {
-    public async Task<Lesson?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        await db.Lessons.FindAsync([id], ct);
+    public async Task<Lesson?> GetByIdAsync(
+        Guid id,
+        long tutorTelegramId,
+        bool track = false,
+        CancellationToken ct = default)
+    {
+        var query = track ? db.Lessons : db.Lessons.AsNoTracking();
+        return await query.SingleOrDefaultAsync(l => l.Id == id && l.TutorTelegramId == tutorTelegramId, ct);
+    }
 
     public async Task<List<Lesson>> GetByTutorInRangeAsync(
         long tutorTelegramId,
@@ -76,15 +83,7 @@ public sealed class EfLessonRepository(AppDbContext db) : ILessonRepository
         await db.Lessons
             .SingleOrDefaultAsync(l => l.SeriesId == seriesId && l.OccurrenceDate == occurrenceDate, ct);
 
-    public async Task AddAsync(Lesson lesson, CancellationToken ct = default)
-    {
-        db.Lessons.Add(lesson);
-        await db.SaveChangesAsync(ct);
-    }
+    public void Add(Lesson lesson) => db.Lessons.Add(lesson);
 
-    public async Task UpdateAsync(Lesson lesson, CancellationToken ct = default)
-    {
-        db.Lessons.Update(lesson);
-        await db.SaveChangesAsync(ct);
-    }
+    public void Update(Lesson lesson) => db.Lessons.Update(lesson);
 }

@@ -44,7 +44,7 @@ public sealed class Student : Entity
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
-    public static Student Create(
+    public static Result<Student> Create(
         long tutorTelegramId,
         string name,
         decimal rate,
@@ -53,12 +53,13 @@ public sealed class Student : Entity
         string? contact = null,
         TimeZoneInfo? timeZone = null)
     {
+        // Programmer error, not user input: the tutor id comes from validated auth data.
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tutorTelegramId);
-        ArgumentOutOfRangeException.ThrowIfNegative(rate);
-        if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Name is required.", nameof(name));
 
-        return new Student(
+        if (Validate(name, rate) is { Count: > 0 } errors)
+            return Result<Student>.Failure([.. errors]);
+
+        return Result<Student>.Success(new Student(
             Guid.NewGuid(),
             tutorTelegramId,
             name.Trim(),
@@ -66,29 +67,43 @@ public sealed class Student : Entity
             createdAtUtc,
             Normalize(subject),
             Normalize(contact),
-            timeZone);
+            timeZone));
     }
 
     /// <summary>Replaces the editable profile fields.</summary>
-    public void UpdateDetails(string name, decimal rate, string? subject, string? contact, TimeZoneInfo? timeZone)
+    public Result UpdateDetails(string name, decimal rate, string? subject, string? contact, TimeZoneInfo? timeZone)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(rate);
-        if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Name is required.", nameof(name));
+        if (Validate(name, rate) is { Count: > 0 } errors)
+            return Result.Failure([.. errors]);
 
         Name = name.Trim();
         Rate = rate;
         Subject = Normalize(subject);
         Contact = Normalize(contact);
         TimeZone = timeZone;
+        return Result.Success();
     }
 
-    public void ChangeStatus(StudentStatus status)
+    public Result ChangeStatus(StudentStatus status)
     {
+        // The API's JSON enum binding already constrains this, but the domain must not rely on
+        // one particular caller — an undefined value is reported, never silently stored.
         if (!Enum.IsDefined(status))
-            throw new ArgumentException($"Unknown student status '{status}'.", nameof(status));
+            return Result.Failure(new Error(
+                "Student.UnknownStatus", $"Unknown student status '{status}'.", "Status"));
 
         Status = status;
+        return Result.Success();
+    }
+
+    private static List<Error> Validate(string name, decimal rate)
+    {
+        var errors = new List<Error>();
+        if (string.IsNullOrWhiteSpace(name))
+            errors.Add(new Error("Student.NameRequired", "Name is required.", "Name"));
+        if (rate < 0)
+            errors.Add(new Error("Student.NegativeRate", "Rate must be zero or positive.", "Rate"));
+        return errors;
     }
 
     private static string? Normalize(string? value) =>

@@ -7,8 +7,15 @@ namespace StudyScheduler.API.Features.Students;
 /// <summary>EF Core implementation of <see cref="IStudentRepository"/> (SQL Server).</summary>
 public sealed class EfStudentRepository(AppDbContext db) : IStudentRepository
 {
-    public async Task<Student?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        await db.Students.FindAsync([id], ct);
+    public async Task<Student?> GetByIdAsync(
+        Guid id,
+        long tutorTelegramId,
+        bool track = false,
+        CancellationToken ct = default)
+    {
+        var query = track ? db.Students : db.Students.AsNoTracking();
+        return await query.SingleOrDefaultAsync(s => s.Id == id && s.TutorTelegramId == tutorTelegramId, ct);
+    }
 
     public async Task<List<Student>> GetByIdsAsync(
         long tutorTelegramId,
@@ -27,15 +34,7 @@ public sealed class EfStudentRepository(AppDbContext db) : IStudentRepository
             .Where(s => s.TutorTelegramId == tutorTelegramId)
             .ToListAsync(ct);
 
-    public async Task AddAsync(Student student, CancellationToken ct = default)
-    {
-        db.Students.Add(student);
-        await db.SaveChangesAsync(ct);
-    }
+    public void Add(Student student) => db.Students.Add(student);
 
-    public async Task UpdateAsync(Student student, CancellationToken ct = default)
-    {
-        db.Students.Update(student);
-        await db.SaveChangesAsync(ct);
-    }
+    public void Update(Student student) => db.Students.Update(student);
 }

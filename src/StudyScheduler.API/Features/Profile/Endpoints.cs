@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.API.Core.ErrorHandling;
 using StudyScheduler.API.Core.Time;
 using StudyScheduler.Domain.Lessons;
+using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Tutors;
 
 namespace StudyScheduler.API.Features.Profile;
@@ -62,6 +64,7 @@ internal static class Endpoints
         UpdateProfileRequest request,
         ITutorProfileRepository repo,
         ILessonSeriesRepository seriesRepo,
+        IUnitOfWork uow,
         TimeProvider clock,
         CancellationToken ct)
     {
@@ -81,19 +84,39 @@ internal static class Endpoints
                 ["LanguageCode"] = ["A two-letter ISO 639-1 language code is required (e.g. \"uk\")."],
             });
 
+        // 0 disables reminders; null leaves the stored setting unchanged (see the contract docs).
+        if (request.RemindMinutes is { } remind and not 0
+            && remind is < TutorProfile.MinRemindMinutes or > TutorProfile.MaxRemindMinutes)
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["RemindMinutes"] = [
+                    $"Reminder lead time must be 0 (off) or between {TutorProfile.MinRemindMinutes} and {TutorProfile.MaxRemindMinutes} minutes."],
+            });
+
+        // The pre-checks above own the HTTP payload wording, so the domain calls below cannot
+        // legitimately fail — their Results are still honored (mapped to 400) rather than
+        // discarded, so a drift between the two layers can't slip through silently.
         var profile = await repo.GetAsync(principal.GetTelegramId(), ct);
         if (profile is null)
         {
-            profile = TutorProfile.Create(principal.GetTelegramId(), timeZone, clock.GetUtcNow(), languageCode);
-            await repo.AddAsync(profile, ct);
+            var created = TutorProfile.Create(principal.GetTelegramId(), timeZone, clock.GetUtcNow(), languageCode);
+            if (!created.IsSuccess)
+                return created.ToValidationProblem();
+            profile = created.Value;
+            if (ApplyNotificationSettings(profile, request) is { IsSuccess: false } settingsFailure)
+                return settingsFailure.ToValidationProblem();
+            repo.Add(profile);
         }
         else
         {
             var previousZone = profile.TimeZone;
             profile.UpdateTimeZone(timeZone);
-            if (languageCode is not null)
-                profile.UpdateLanguage(languageCode);
-            await repo.UpdateAsync(profile, ct);
+            if (languageCode is not null
+                && profile.UpdateLanguage(languageCode) is { IsSuccess: false } languageFailure)
+                return languageFailure.ToValidationProblem();
+            if (ApplyNotificationSettings(profile, request) is { IsSuccess: false } settingsFailure)
+                return settingsFailure.ToValidationProblem();
+            repo.Update(profile);
 
             if (previousZone.Id != timeZone.Id)
             {
@@ -101,11 +124,29 @@ internal static class Endpoints
                     principal.GetTelegramId(), previousZone, ct))
                 {
                     series.MoveToTimeZone(timeZone);
-                    await seriesRepo.UpdateAsync(series, ct);
+                    seriesRepo.Update(series);
                 }
             }
         }
 
+        // One commit for the profile and the rebased series — a zone change either moves
+        // everything or nothing, never a profile pointing at a zone its series don't share.
+        await uow.SaveChangesAsync(ct);
         return TypedResults.Ok(ProfileResponse.From(profile));
+    }
+
+    private static Result ApplyNotificationSettings(TutorProfile profile, UpdateProfileRequest request)
+    {
+        if (request.RemindMinutes is { } remind)
+        {
+            // 0 (off) maps to the domain's null before the range check re-runs there.
+            var updated = profile.UpdateRemindMinutes(remind == 0 ? null : remind);
+            if (!updated.IsSuccess)
+                return updated;
+        }
+
+        if (request.NotifyAfterLesson is { } notifyAfter)
+            profile.UpdateNotifyAfterLesson(notifyAfter);
+        return Result.Success();
     }
 }

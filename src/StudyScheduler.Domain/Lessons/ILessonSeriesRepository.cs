@@ -3,7 +3,12 @@ namespace StudyScheduler.Domain.Lessons;
 /// <summary>Persistence contract for <see cref="LessonSeries"/>.</summary>
 public interface ILessonSeriesRepository
 {
-    Task<LessonSeries?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    /// <summary>
+    /// The series with the given id owned by the tutor, or null — ownership is part of the
+    /// query, so cross-tenant ids look exactly like missing ones. Untracked unless
+    /// <paramref name="track"/> is set; pass <c>true</c> when the entity will be mutated.
+    /// </summary>
+    Task<LessonSeries?> GetByIdAsync(Guid id, long tutorTelegramId, bool track = false, CancellationToken ct = default);
 
     /// <summary>Active series of the tutor. Read-only (untracked) — do not mutate and save.</summary>
     Task<List<LessonSeries>> GetActiveByTutorAsync(long tutorTelegramId, CancellationToken ct = default);
@@ -26,7 +31,9 @@ public interface ILessonSeriesRepository
         TimeZoneInfo timeZone,
         CancellationToken ct = default);
 
-    Task AddAsync(LessonSeries series, CancellationToken ct = default);
+    /// <summary>Stages the series for insertion; nothing is written until <see cref="Primitives.IUnitOfWork.SaveChangesAsync"/>.</summary>
+    void Add(LessonSeries series);
 
-    Task UpdateAsync(LessonSeries series, CancellationToken ct = default);
+    /// <summary>Stages the series for update; nothing is written until <see cref="Primitives.IUnitOfWork.SaveChangesAsync"/>.</summary>
+    void Update(LessonSeries series);
 }

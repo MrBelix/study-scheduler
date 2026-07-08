@@ -7,8 +7,15 @@ namespace StudyScheduler.API.Features.Lessons;
 /// <summary>EF Core implementation of <see cref="ILessonSeriesRepository"/> (SQL Server).</summary>
 public sealed class EfLessonSeriesRepository(AppDbContext db) : ILessonSeriesRepository
 {
-    public async Task<LessonSeries?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        await db.LessonSeries.FindAsync([id], ct);
+    public async Task<LessonSeries?> GetByIdAsync(
+        Guid id,
+        long tutorTelegramId,
+        bool track = false,
+        CancellationToken ct = default)
+    {
+        var query = track ? db.LessonSeries : db.LessonSeries.AsNoTracking();
+        return await query.SingleOrDefaultAsync(s => s.Id == id && s.TutorTelegramId == tutorTelegramId, ct);
+    }
 
     // Read-only consumers (schedule expansion, overlap checks) — untracked per the contract.
     public async Task<List<LessonSeries>> GetActiveByTutorAsync(
@@ -47,15 +54,7 @@ public sealed class EfLessonSeriesRepository(AppDbContext db) : ILessonSeriesRep
             .Where(s => s.TutorTelegramId == tutorTelegramId && s.IsActive && s.TimeZone == timeZone)
             .ToListAsync(ct);
 
-    public async Task AddAsync(LessonSeries series, CancellationToken ct = default)
-    {
-        db.LessonSeries.Add(series);
-        await db.SaveChangesAsync(ct);
-    }
+    public void Add(LessonSeries series) => db.LessonSeries.Add(series);
 
-    public async Task UpdateAsync(LessonSeries series, CancellationToken ct = default)
-    {
-        db.LessonSeries.Update(series);
-        await db.SaveChangesAsync(ct);
-    }
+    public void Update(LessonSeries series) => db.LessonSeries.Update(series);
 }
