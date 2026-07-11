@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Students;
 using StudyScheduler.Domain.Tutors;
 
@@ -9,6 +10,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Student> Students => Set<Student>();
 
     public DbSet<TutorProfile> TutorProfiles => Set<TutorProfile>();
+
+    public DbSet<LessonSeries> LessonSeries => Set<LessonSeries>();
+
+    public DbSet<Lesson> Lessons => Set<Lesson>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

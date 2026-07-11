@@ -30,4 +30,10 @@ internal static class TimeZoneInfoConversion
         property
             .HasConversion(Converter, Comparer)
             .HasMaxLength(100);
+
+    /// <summary>Same conversion for a property mapped inside a complex (value-object) type.</summary>
+    public static ComplexTypePropertyBuilder<T> HasTimeZoneConversion<T>(this ComplexTypePropertyBuilder<T> property) =>
+        property
+            .HasConversion(Converter, Comparer)
+            .HasMaxLength(100);
 }
