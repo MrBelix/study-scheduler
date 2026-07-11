@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using StudyScheduler.API.Core.Authentication;
 using StudyScheduler.API.Core.ErrorHandling;
 using StudyScheduler.API.Core.Time;
-using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Tutors;
 
@@ -56,14 +55,12 @@ internal static class Endpoints
     /// <summary>
     /// Creates or updates the current tutor's profile (upsert). <c>LanguageCode</c> null leaves
     /// the stored language untouched, so time-zone-only and language-only saves don't clobber
-    /// each other. Changing the zone moves the active series anchored in the old profile zone
-    /// along with it (wall-clock preserved); series anchored elsewhere keep their own zone.
+    /// each other.
     /// </summary>
     public static async Task<Results<Ok<ProfileResponse>, ValidationProblem>> Put(
         ClaimsPrincipal principal,
         UpdateProfileRequest request,
         ITutorProfileRepository repo,
-        ILessonSeriesRepository seriesRepo,
         IUnitOfWork uow,
         TimeProvider clock,
         CancellationToken ct)
@@ -74,15 +71,17 @@ internal static class Endpoints
                 ["TimeZoneId"] = ["A valid IANA time zone id is required (e.g. \"Europe/Kyiv\")."],
             });
 
-        // Two-letter ISO 639-1, case-insensitive ("UK" → "uk"). Deliberately not a hard
-        // uk/en whitelist: a new client locale must not require a backend release.
-        var languageCode = request.LanguageCode?.Trim().ToLowerInvariant();
-        if (languageCode is not null
-            && (languageCode.Length != 2 || !languageCode.All(char.IsAsciiLetterLower)))
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["LanguageCode"] = ["A two-letter ISO 639-1 language code is required (e.g. \"uk\")."],
-            });
+        // The DTO stays a nullable string so an unknown value yields the clean ValidationProblem
+        // below rather than a JSON-binding 400. Parse it once, here, through the domain's single
+        // source of truth: null means "leave the language unchanged" (see the contract docs).
+        AppLanguage? languageCode = null;
+        if (request.LanguageCode is not null)
+        {
+            var parsedLanguage = AppLanguageCode.ParseCode(request.LanguageCode);
+            if (!parsedLanguage.IsSuccess)
+                return parsedLanguage.ToValidationProblem();
+            languageCode = parsedLanguage.Value;
+        }
 
         // 0 disables reminders; null leaves the stored setting unchanged (see the contract docs).
         if (request.RemindMinutes is { } remind and not 0
@@ -109,28 +108,14 @@ internal static class Endpoints
         }
         else
         {
-            var previousZone = profile.TimeZone;
             profile.UpdateTimeZone(timeZone);
-            if (languageCode is not null
-                && profile.UpdateLanguage(languageCode) is { IsSuccess: false } languageFailure)
-                return languageFailure.ToValidationProblem();
+            if (languageCode is { } language)
+                profile.UpdateLanguage(language);
             if (ApplyNotificationSettings(profile, request) is { IsSuccess: false } settingsFailure)
                 return settingsFailure.ToValidationProblem();
             repo.Update(profile);
-
-            if (previousZone.Id != timeZone.Id)
-            {
-                foreach (var series in await seriesRepo.GetActiveByTimeZoneAsync(
-                    principal.GetTelegramId(), previousZone, ct))
-                {
-                    series.MoveToTimeZone(timeZone);
-                    seriesRepo.Update(series);
-                }
-            }
         }
 
-        // One commit for the profile and the rebased series — a zone change either moves
-        // everything or nothing, never a profile pointing at a zone its series don't share.
         await uow.SaveChangesAsync(ct);
         return TypedResults.Ok(ProfileResponse.From(profile));
     }

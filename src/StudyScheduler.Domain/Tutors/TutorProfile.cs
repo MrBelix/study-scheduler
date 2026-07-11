@@ -13,7 +13,7 @@ public sealed class TutorProfile
     public const int MaxRemindMinutes = 240;
     public const int DefaultRemindMinutes = 30;
 
-    private TutorProfile(long telegramUserId, TimeZoneInfo timeZone, string? languageCode, DateTimeOffset createdAtUtc)
+    private TutorProfile(long telegramUserId, TimeZoneInfo timeZone, AppLanguage? languageCode, DateTimeOffset createdAtUtc)
     {
         TelegramUserId = telegramUserId;
         TimeZone = timeZone;
@@ -29,10 +29,10 @@ public sealed class TutorProfile
     public TimeZoneInfo TimeZone { get; private set; }
 
     /// <summary>
-    /// Preferred UI language as a lower-case two-letter ISO 639-1 code (e.g. "uk");
-    /// <c>null</c> until the tutor explicitly picks one.
+    /// Preferred UI language; <c>null</c> until the tutor explicitly picks one. Persisted as its
+    /// two-letter ISO 639-1 code ("uk"/"en") via an EF value conversion.
     /// </summary>
-    public string? LanguageCode { get; private set; }
+    public AppLanguage? LanguageCode { get; private set; }
 
     /// <summary>
     /// Bot reminder lead time before a lesson, in minutes; <c>null</c> disables reminders.
@@ -49,25 +49,18 @@ public sealed class TutorProfile
         long telegramUserId,
         TimeZoneInfo timeZone,
         DateTimeOffset createdAtUtc,
-        string? languageCode = null)
+        AppLanguage? languageCode = null)
     {
         // Programmer errors, not user input: the id comes from validated auth data and the
         // time zone is resolved by the caller before it gets here.
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(telegramUserId);
         ArgumentNullException.ThrowIfNull(timeZone);
 
-        string? normalizedLanguage = null;
-        if (languageCode is not null)
-        {
-            if (NormalizeLanguage(languageCode) is not { } normalized)
-                return Result<TutorProfile>.Failure(InvalidLanguageCode());
-            normalizedLanguage = normalized;
-        }
-
+        // The language is already a validated enum, so there is nothing left to reject here.
         return Result<TutorProfile>.Success(new TutorProfile(
             telegramUserId,
             timeZone,
-            normalizedLanguage,
+            languageCode,
             createdAtUtc));
     }
 
@@ -77,16 +70,8 @@ public sealed class TutorProfile
         TimeZone = timeZone;
     }
 
-    public Result UpdateLanguage(string languageCode)
-    {
-        ArgumentNullException.ThrowIfNull(languageCode);
-
-        if (NormalizeLanguage(languageCode) is not { } normalized)
-            return Result.Failure(InvalidLanguageCode());
-
-        LanguageCode = normalized;
-        return Result.Success();
-    }
+    /// <summary>Type-safe language setter — the enum can't be invalid, so there is nothing to fail.</summary>
+    public void UpdateLanguage(AppLanguage languageCode) => LanguageCode = languageCode;
 
     /// <summary>Sets the reminder lead time; <c>null</c> turns reminders off.</summary>
     public Result UpdateRemindMinutes(int? remindMinutes)
@@ -102,18 +87,4 @@ public sealed class TutorProfile
     }
 
     public void UpdateNotifyAfterLesson(bool enabled) => NotifyAfterLesson = enabled;
-
-    /// <summary>The normalized two-letter code, or <c>null</c> when the input is not one.</summary>
-    private static string? NormalizeLanguage(string languageCode)
-    {
-        var normalized = languageCode.Trim().ToLowerInvariant();
-        return normalized.Length == 2 && normalized.All(char.IsAsciiLetterLower)
-            ? normalized
-            : null;
-    }
-
-    private static Error InvalidLanguageCode() => new(
-        "Profile.InvalidLanguageCode",
-        "Language code must be a two-letter ISO 639-1 code.",
-        "LanguageCode");
 }

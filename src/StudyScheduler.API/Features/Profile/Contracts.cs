@@ -25,7 +25,8 @@ public sealed record ProfileResponse(
 {
     public static ProfileResponse From(TutorProfile profile) => new(
         profile.TimeZone.Id,
-        profile.LanguageCode,
+        // Serialize the enum back to its lowercase wire code ("uk"/"en"); null stays null.
+        profile.LanguageCode?.ToCode(),
         profile.RemindMinutes,
         profile.NotifyAfterLesson,
         profile.CreatedAtUtc);

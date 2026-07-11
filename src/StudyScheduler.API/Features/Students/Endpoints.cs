@@ -2,8 +2,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using StudyScheduler.API.Core.Authentication;
 using StudyScheduler.API.Core.ErrorHandling;
-using StudyScheduler.API.Core.Time;
-using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Students;
 
@@ -45,19 +43,12 @@ internal static class Endpoints
         TimeProvider clock,
         CancellationToken ct)
     {
-        // The time zone id is an HTTP-contract concern (the domain receives a resolved
-        // TimeZoneInfo); name/rate invariants are the domain factory's job.
-        if (ValidateTimeZoneId(request.TimeZoneId) is { } errors)
-            return TypedResults.ValidationProblem(errors);
-
+        // Name/rate invariants are the domain factory's job.
         var created = Student.Create(
             principal.GetTelegramId(),
             request.Name,
             request.Rate,
-            clock.GetUtcNow(),
-            request.Subject,
-            request.Contact,
-            ParseTimeZone(request.TimeZoneId));
+            clock.GetUtcNow());
         if (!created.IsSuccess)
             return created.ToValidationProblem();
         var student = created.Value;
@@ -67,22 +58,13 @@ internal static class Endpoints
         return TypedResults.Created($"/students/{student.Id}", StudentResponse.From(student));
     }
 
-    /// <summary>
-    /// Partially updates a student (including archive via status), scoped to the current tutor.
-    /// Archiving also ends the student's active lesson series: their future virtual slots stop
-    /// expanding and stop blocking the tutor's schedule. The archive and the series endings
-    /// commit as one unit — a failure can't leave an archived student with live series.
-    /// Physical lessons (past or individually touched) stay untouched, and un-archiving does
-    /// not resurrect the ended series.
-    /// </summary>
+    /// <summary>Partially updates a student (including archive via status), scoped to the current tutor.</summary>
     public static async Task<Results<Ok<StudentResponse>, NotFound, ValidationProblem>> Update(
         Guid id,
         ClaimsPrincipal principal,
         UpdateStudentRequest request,
         IStudentRepository repo,
-        ILessonSeriesRepository seriesRepo,
         IUnitOfWork uow,
-        TimeProvider clock,
         CancellationToken ct)
     {
         var tutorId = principal.GetTelegramId();
@@ -91,46 +73,19 @@ internal static class Endpoints
         if (student is null)
             return TypedResults.NotFound();
 
-        if (ValidateTimeZoneId(request.TimeZoneId) is { } timeZoneErrors)
-            return TypedResults.ValidationProblem(timeZoneErrors);
-
-        var archiving = request.Status == StudentStatus.Archived && student.Status != StudentStatus.Archived;
-
         // Domain mutators validate the merged fields; failures are collected so one 400 still
         // reports every offending field, before anything is staged for save.
         var errors = new List<Error>();
         errors.AddRange(student.UpdateDetails(
             request.Name ?? student.Name,
-            request.Rate ?? student.Rate,
-            request.Subject ?? student.Subject,
-            request.Contact ?? student.Contact,
-            request.TimeZoneId is null ? student.TimeZone : ParseTimeZone(request.TimeZoneId)).Errors);
+            request.Rate ?? student.Rate).Errors);
         if (request.Status is { } status)
             errors.AddRange(student.ChangeStatus(status).Errors);
         if (errors.Count > 0)
             return Result.Failure([.. errors]).ToValidationProblem();
 
         repo.Update(student);
-
-        if (archiving)
-        {
-            foreach (var series in await seriesRepo.GetActiveByStudentAsync(tutorId, student.Id, ct))
-            {
-                series.EndAsOf(clock.GetUtcNow());
-                seriesRepo.Update(series);
-            }
-        }
-
         await uow.SaveChangesAsync(ct);
         return TypedResults.Ok(StudentResponse.From(student));
     }
-
-    private static Dictionary<string, string[]>? ValidateTimeZoneId(string? timeZoneId) =>
-        !string.IsNullOrWhiteSpace(timeZoneId) && !IanaTimeZone.TryResolve(timeZoneId, out _)
-            ? new Dictionary<string, string[]> { ["TimeZoneId"] = ["Unknown time zone."] }
-            : null;
-
-    /// <summary>Assumes the id already passed validation; blank means "no time zone".</summary>
-    private static TimeZoneInfo? ParseTimeZone(string? timeZoneId) =>
-        IanaTimeZone.TryResolve(timeZoneId, out var timeZone) ? timeZone : null;
 }

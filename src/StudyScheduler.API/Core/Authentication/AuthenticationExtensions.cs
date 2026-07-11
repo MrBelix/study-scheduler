@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 
 namespace StudyScheduler.API.Core.Authentication;
@@ -27,20 +26,5 @@ public static class AuthenticationExtensions
         services.AddAuthorization();
 
         return services;
-    }
-
-    /// <summary>Maps <c>GET /me</c> — the current authenticated Telegram user, projected from claims.</summary>
-    public static IEndpointRouteBuilder MapCurrentUser(this IEndpointRouteBuilder app)
-    {
-        app.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new
-        {
-            Id = user.FindFirstValue(ClaimTypes.NameIdentifier),
-            Username = user.FindFirstValue(TelegramClaimTypes.Username),
-            FirstName = user.FindFirstValue(ClaimTypes.GivenName),
-            LastName = user.FindFirstValue(ClaimTypes.Surname),
-        }))
-        .RequireAuthorization();
-
-        return app;
     }
 }

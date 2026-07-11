@@ -59,51 +59,21 @@ public class TutorProfileTests
     }
 
     [Fact]
-    public void Create_WithLanguage_NormalizesToLowerCase()
+    public void Create_WithLanguage_SetsIt()
     {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: " UK ").Value;
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: AppLanguage.Uk).Value;
 
-        Assert.Equal("uk", profile.LanguageCode);
+        Assert.Equal(AppLanguage.Uk, profile.LanguageCode);
     }
 
     [Fact]
-    public void Create_WithInvalidLanguage_Fails()
+    public void UpdateLanguage_Replaces()
     {
-        var result = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: "ukr");
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: AppLanguage.Uk).Value;
 
-        Assert.False(result.IsSuccess);
-        var error = Assert.Single(result.Errors);
-        Assert.Equal("LanguageCode", error.Field);
-        Assert.Equal("Profile.InvalidLanguageCode", error.Code);
-    }
+        profile.UpdateLanguage(AppLanguage.En);
 
-    [Fact]
-    public void UpdateLanguage_Valid_Replaces()
-    {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt, languageCode: "uk").Value;
-
-        var result = profile.UpdateLanguage("en");
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal("en", profile.LanguageCode);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("u")]
-    [InlineData("ukr")]
-    [InlineData("u1")]
-    [InlineData("u-")]
-    public void UpdateLanguage_NotTwoLetters_FailsWithoutMutating(string code)
-    {
-        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
-
-        var result = profile.UpdateLanguage(code);
-
-        Assert.False(result.IsSuccess);
-        Assert.Equal("LanguageCode", Assert.Single(result.Errors).Field);
-        Assert.Null(profile.LanguageCode);
+        Assert.Equal(AppLanguage.En, profile.LanguageCode);
     }
 
     [Fact]

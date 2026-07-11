@@ -5,8 +5,6 @@ using StudyScheduler.API.Core.ErrorHandling;
 using StudyScheduler.API.Core.OpenApi;
 using StudyScheduler.API.Core.Persistence;
 using StudyScheduler.API.Core.RateLimiting;
-using StudyScheduler.API.Features.Lessons;
-using StudyScheduler.API.Features.Notifications;
 using StudyScheduler.API.Features.Profile;
 using StudyScheduler.API.Features.Students;
 
@@ -27,8 +25,6 @@ builder.Services.AddTelegramAuthentication();
 builder.Services.AddMiniAppCors(builder.Configuration, builder.Environment);
 builder.Services.AddStudentsFeature();
 builder.Services.AddProfileFeature();
-builder.Services.AddLessonsFeature();
-builder.Services.AddNotificationsFeature();
 
 var app = builder.Build();
 
@@ -42,11 +38,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
-app.MapCurrentUser();
 app.MapStudentsFeature();
 app.MapProfileFeature();
-app.MapLessonsFeature();
-app.MapNotificationsFeature();
 app.MapDefaultEndpoints();
 
 app.Run();

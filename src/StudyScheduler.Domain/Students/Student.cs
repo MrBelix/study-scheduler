@@ -9,19 +9,13 @@ public sealed class Student : Entity
         long tutorTelegramId,
         string name,
         decimal rate,
-        DateTimeOffset createdAtUtc,
-        string? subject,
-        string? contact,
-        TimeZoneInfo? timeZone)
+        DateTimeOffset createdAtUtc)
         : base(id)
     {
         TutorTelegramId = tutorTelegramId;
         Name = name;
         Rate = rate;
         CreatedAtUtc = createdAtUtc;
-        Subject = subject;
-        Contact = contact;
-        TimeZone = timeZone;
         Status = StudentStatus.Active;
     }
 
@@ -33,13 +27,6 @@ public sealed class Student : Entity
     /// <summary>Price per lesson. Money is always <c>decimal</c>.</summary>
     public decimal Rate { get; private set; }
 
-    public string? Subject { get; private set; }
-
-    public string? Contact { get; private set; }
-
-    /// <summary>Optional time zone of the student (informational); persisted by its IANA id.</summary>
-    public TimeZoneInfo? TimeZone { get; private set; }
-
     public StudentStatus Status { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
@@ -48,10 +35,7 @@ public sealed class Student : Entity
         long tutorTelegramId,
         string name,
         decimal rate,
-        DateTimeOffset createdAtUtc,
-        string? subject = null,
-        string? contact = null,
-        TimeZoneInfo? timeZone = null)
+        DateTimeOffset createdAtUtc)
     {
         // Programmer error, not user input: the tutor id comes from validated auth data.
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tutorTelegramId);
@@ -64,23 +48,17 @@ public sealed class Student : Entity
             tutorTelegramId,
             name.Trim(),
             rate,
-            createdAtUtc,
-            Normalize(subject),
-            Normalize(contact),
-            timeZone));
+            createdAtUtc));
     }
 
     /// <summary>Replaces the editable profile fields.</summary>
-    public Result UpdateDetails(string name, decimal rate, string? subject, string? contact, TimeZoneInfo? timeZone)
+    public Result UpdateDetails(string name, decimal rate)
     {
         if (Validate(name, rate) is { Count: > 0 } errors)
             return Result.Failure([.. errors]);
 
         Name = name.Trim();
         Rate = rate;
-        Subject = Normalize(subject);
-        Contact = Normalize(contact);
-        TimeZone = timeZone;
         return Result.Success();
     }
 
@@ -105,7 +83,4 @@ public sealed class Student : Entity
             errors.Add(new Error("Student.NegativeRate", "Rate must be zero or positive.", "Rate"));
         return errors;
     }
-
-    private static string? Normalize(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

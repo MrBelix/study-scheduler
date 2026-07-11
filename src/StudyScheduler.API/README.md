@@ -14,7 +14,6 @@ builder.Services.AddTelegramAuthentication();
 builder.Services.AddMiniAppCors(...);
 builder.Services.AddStudentsFeature(); // one line per feature
 ...
-app.MapCurrentUser();
 app.MapStudentsFeature();              // one line per feature
 ```
 
@@ -66,7 +65,6 @@ Then add one `builder.Services.Add<Name>Feature()` and one `app.Map<Name>Feature
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET`   | `/me`            | Current Telegram user |
 | `GET`   | `/students`      | List the current tutor's students |
 | `GET`   | `/students/{id}` | One student (scoped; foreign id → 404) |
 | `POST`  | `/students`      | Create a student |

@@ -10,24 +10,14 @@ public class StudentTests
     [Fact]
     public void Create_ValidInput_SetsFieldsAndDefaultsToActive()
     {
-        var student = Student.Create(555, "  Bob  ", 250m, CreatedAt, subject: " Math ", contact: " @bob ").Value;
+        var student = Student.Create(555, "  Bob  ", 250m, CreatedAt).Value;
 
         Assert.NotEqual(Guid.Empty, student.Id);
         Assert.Equal(555, student.TutorTelegramId);
         Assert.Equal("Bob", student.Name);
         Assert.Equal(250m, student.Rate);
-        Assert.Equal("Math", student.Subject);
-        Assert.Equal("@bob", student.Contact);
         Assert.Equal(StudentStatus.Active, student.Status);
         Assert.Equal(CreatedAt, student.CreatedAtUtc);
-    }
-
-    [Fact]
-    public void Create_BlankSubject_NormalizedToNull()
-    {
-        var student = Student.Create(555, "Bob", 0m, CreatedAt, subject: "   ").Value;
-
-        Assert.Null(student.Subject);
     }
 
     [Theory]
@@ -65,16 +55,13 @@ public class StudentTests
     [Fact]
     public void UpdateDetails_ReplacesEditableFields()
     {
-        var student = Student.Create(555, "Bob", 100m, CreatedAt, "Math", "@bob").Value;
+        var student = Student.Create(555, "Bob", 100m, CreatedAt).Value;
 
-        var result = student.UpdateDetails("Alice", 300m, "Physics", null, TimeZoneInfo.FindSystemTimeZoneById("Europe/Kyiv"));
+        var result = student.UpdateDetails("Alice", 300m);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("Alice", student.Name);
         Assert.Equal(300m, student.Rate);
-        Assert.Equal("Physics", student.Subject);
-        Assert.Null(student.Contact);
-        Assert.Equal("Europe/Kyiv", student.TimeZone?.Id);
         Assert.Equal(555, student.TutorTelegramId); // ownership never changes
     }
 
@@ -83,19 +70,11 @@ public class StudentTests
     {
         var student = Student.Create(555, "Bob", 100m, CreatedAt).Value;
 
-        var result = student.UpdateDetails(" ", 100m, null, null, null);
+        var result = student.UpdateDetails(" ", 100m);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Name", Assert.Single(result.Errors).Field);
         Assert.Equal("Bob", student.Name);
-    }
-
-    [Fact]
-    public void Create_WithoutTimeZone_LeavesItNull()
-    {
-        var student = Student.Create(555, "Bob", 100m, CreatedAt).Value;
-
-        Assert.Null(student.TimeZone);
     }
 
     [Fact]

@@ -12,7 +12,7 @@ using StudyScheduler.API.Core.Persistence;
 namespace StudyScheduler.API.Core.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260701021253_InitialCreate")]
+    [Migration("20260711143713_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -20,7 +20,7 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.8")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -30,10 +30,6 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Contact")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("datetimeoffset");
@@ -52,10 +48,6 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.Property<string>("Subject")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
                     b.Property<long>("TutorTelegramId")
                         .HasColumnType("bigint");
 
@@ -64,6 +56,35 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                     b.HasIndex("TutorTelegramId");
 
                     b.ToTable("Students", (string)null);
+                });
+
+            modelBuilder.Entity("StudyScheduler.Domain.Tutors.TutorProfile", b =>
+                {
+                    b.Property<long>("TelegramUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("LanguageCode")
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)");
+
+                    b.Property<bool>("NotifyAfterLesson")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("RemindMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TimeZone")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("TimeZoneId");
+
+                    b.HasKey("TelegramUserId");
+
+                    b.ToTable("TutorProfiles", (string)null);
                 });
 #pragma warning restore 612, 618
         }
