@@ -8,10 +8,12 @@ public class NotificationStateTests
     private static readonly DateTimeOffset SentAt = new(2026, 7, 6, 14, 30, 0, TimeSpan.Zero);
 
     [Fact]
-    public void None_HasBothTimestampsNullAndNothingSent()
+    public void None_Default_HasNullTimestampsAndNothingSent()
     {
+        // Act
         var state = NotificationState.None;
 
+        // Assert
         Assert.Null(state.ReminderSentAtUtc);
         Assert.Null(state.FollowUpSentAtUtc);
         Assert.False(state.IsReminderSent);
@@ -19,12 +21,15 @@ public class NotificationStateTests
     }
 
     [Fact]
-    public void WithReminderSent_SetsReminderLeavesFollowUpAndReturnsNewInstance()
+    public void WithReminderSent_FromNone_SetsReminderAndReturnsNewInstance()
     {
+        // Arrange
         var original = NotificationState.None;
 
+        // Act
         var updated = original.WithReminderSent(SentAt);
 
+        // Assert
         Assert.Equal(SentAt, updated.ReminderSentAtUtc);
         Assert.True(updated.IsReminderSent);
         Assert.Null(updated.FollowUpSentAtUtc);
@@ -37,12 +42,15 @@ public class NotificationStateTests
     }
 
     [Fact]
-    public void WithFollowUpSent_SetsFollowUpLeavesReminderAndReturnsNewInstance()
+    public void WithFollowUpSent_FromNone_SetsFollowUpAndReturnsNewInstance()
     {
+        // Arrange
         var original = NotificationState.None;
 
+        // Act
         var updated = original.WithFollowUpSent(SentAt);
 
+        // Assert
         Assert.Equal(SentAt, updated.FollowUpSentAtUtc);
         Assert.True(updated.IsFollowUpSent);
         Assert.Null(updated.ReminderSentAtUtc);

@@ -13,7 +13,7 @@ public sealed class EfTutorProfileRepository(AppDbContext db) : ITutorProfileRep
     public async Task<IReadOnlyList<TutorProfile>> GetNotifiableAsync(CancellationToken ct = default) =>
         await db.TutorProfiles
             .AsNoTracking()
-            .Where(p => p.RemindMinutes != null || p.NotifyAfterLesson)
+            .Where(p => (p.RemindMinutes != null || p.NotifyAfterLesson) && p.BotReachable)
             .ToListAsync(ct);
 
     public void Add(TutorProfile profile) => db.TutorProfiles.Add(profile);

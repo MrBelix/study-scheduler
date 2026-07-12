@@ -27,6 +27,8 @@ internal sealed class TutorProfileConfiguration : IEntityTypeConfiguration<Tutor
             .HasMaxLength(2);
         builder.Property(p => p.RemindMinutes);
         builder.Property(p => p.NotifyAfterLesson);
+        // Optimistic reachability: existing rows backfill to reachable via the DB default.
+        builder.Property(p => p.BotReachable).HasDefaultValue(true);
         builder.Property(p => p.CreatedAtUtc);
     }
 }

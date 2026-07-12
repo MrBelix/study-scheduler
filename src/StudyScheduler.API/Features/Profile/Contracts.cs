@@ -15,12 +15,17 @@ public sealed record UpdateProfileRequest(
     int? RemindMinutes = null,
     bool? NotifyAfterLesson = null);
 
-/// <summary>Tutor profile projection returned to the client. <c>RemindMinutes</c> null — reminders off.</summary>
+/// <summary>
+/// Tutor profile projection returned to the client. <c>RemindMinutes</c> null — reminders off.
+/// <c>BotReachable</c> false means the bot was blocked/never-started (a 403 disabled it); the client
+/// prompts the tutor to reopen the bot to resume notifications.
+/// </summary>
 public sealed record ProfileResponse(
     string TimeZoneId,
     string? LanguageCode,
     int? RemindMinutes,
     bool NotifyAfterLesson,
+    bool BotReachable,
     DateTimeOffset CreatedAtUtc)
 {
     public static ProfileResponse From(TutorProfile profile) => new(
@@ -29,5 +34,6 @@ public sealed record ProfileResponse(
         profile.LanguageCode?.ToCode(),
         profile.RemindMinutes,
         profile.NotifyAfterLesson,
+        profile.BotReachable,
         profile.CreatedAtUtc);
 }

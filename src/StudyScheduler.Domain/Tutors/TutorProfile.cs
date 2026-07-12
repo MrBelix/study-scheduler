@@ -21,6 +21,7 @@ public sealed class TutorProfile
         CreatedAtUtc = createdAtUtc;
         RemindMinutes = DefaultRemindMinutes;
         NotifyAfterLesson = true;
+        BotReachable = true;
     }
 
     public long TelegramUserId { get; private set; }
@@ -42,6 +43,14 @@ public sealed class TutorProfile
 
     /// <summary>Send the after-lesson follow-up prompt (mark completed/paid/cancelled).</summary>
     public bool NotifyAfterLesson { get; private set; }
+
+    /// <summary>
+    /// Optimistic reachability flag: <c>true</c> means the bot's chat with this tutor is assumed
+    /// deliverable. Flipped to <c>false</c> when a send is rejected with Telegram 403 (bot not
+    /// started or blocked), which stops the poller from targeting this tutor until the bot is
+    /// re-enabled (handled later by the /start webhook via <see cref="MarkBotReachable"/>).
+    /// </summary>
+    public bool BotReachable { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
@@ -87,4 +96,10 @@ public sealed class TutorProfile
     }
 
     public void UpdateNotifyAfterLesson(bool enabled) => NotifyAfterLesson = enabled;
+
+    /// <summary>Marks the bot chat undeliverable after a 403 so the poller skips this tutor.</summary>
+    public void MarkBotUnreachable() => BotReachable = false;
+
+    /// <summary>Restores deliverability (the /start webhook will call this in a later stage).</summary>
+    public void MarkBotReachable() => BotReachable = true;
 }
