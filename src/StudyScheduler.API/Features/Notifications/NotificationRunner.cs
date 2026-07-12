@@ -164,7 +164,7 @@ public sealed class NotificationRunner(
         {
             var localStart = TimeZoneInfo.ConvertTime(lesson.StartUtc, profile.TimeZone);
             body = text.Reminder(lang, name, localStart);
-            buttons = [];
+            buttons = text.ReminderButtons(lang, lesson.Id);
         }
         else
         {

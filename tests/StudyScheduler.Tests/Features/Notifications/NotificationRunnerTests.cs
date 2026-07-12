@@ -77,7 +77,33 @@ public class NotificationRunnerTests
 
         var sent = Assert.Single(_sender.Sent);
         Assert.Equal(Tutor, sent.ChatId);
-        Assert.Empty(sent.Buttons);
+    }
+
+    [Fact]
+    public async Task RunAsync_DueReminder_SendsSingleCancelButtonWithLessonCallback()
+    {
+        // Arrange
+        var studentId = AddStudent("Ann");
+        AddProfile(remind: 30, followUp: false);
+        _series.Items.Add(LessonSeries.Create(
+            Tutor, studentId,
+            WeeklyPattern.Create(Weekdays.Monday, new TimeOnly(16, 0), 60, London).Value,
+            Monday, CreatedAt).Value);
+
+        // Slot starts 15:00 UTC; 14:45 is 15 min before → inside the 30-min reminder window.
+        var now = new DateTimeOffset(2026, 7, 6, 14, 45, 0, TimeSpan.Zero);
+
+        // Act
+        await Build(now).RunAsync();
+
+        // Assert
+        // The reminder carries exactly one Cancel button on the shared 'x:' cancel callback (same as the
+        // follow-up's ❌, so both obey the single Completed-status guard), whose payload references the
+        // now-persisted lesson id. The profile has no language set, so Ukrainian (the default) label is used.
+        var lesson = Assert.Single(_lessons.Items);
+        var button = Assert.Single(Assert.Single(_sender.Sent).Buttons);
+        Assert.Equal("❌ Скасувати", button.Text);
+        Assert.Equal($"x:{lesson.Id:N}", button.CallbackData);
     }
 
     [Fact]
@@ -146,8 +172,8 @@ public class NotificationRunnerTests
         await Build(now).RunAsync();
 
         // Assert
-        // Exactly one send, and it is the follow-up (has buttons) — no reminder went out.
-        Assert.NotEmpty(Assert.Single(_sender.Sent).Buttons);
+        // Exactly one send, and it is the follow-up (three buttons) — no reminder went out.
+        Assert.Equal(3, Assert.Single(_sender.Sent).Buttons.Count);
     }
 
     [Fact]

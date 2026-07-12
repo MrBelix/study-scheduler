@@ -92,13 +92,49 @@ public class LessonSeriesTests
     }
 
     [Fact]
-    public void EndAsOf_UsesPatternTimeZoneToday()
+    public void CancelAsOf_UsesPatternTimeZoneYesterday()
     {
+        // Arrange
         var series = NewSeries(start: new DateOnly(2026, 1, 1));
-        // 2026-07-10 00:30 UTC is still 2026-07-10 01:30 in London (BST).
-        series.EndAsOf(new DateTimeOffset(2026, 7, 10, 0, 30, 0, TimeSpan.Zero));
 
-        Assert.Equal(new DateOnly(2026, 7, 10), series.EndDate);
+        // Act
+        // 2026-07-10 00:30 UTC is still 2026-07-10 01:30 in London (BST), so local "today" is Jul 10
+        // and the last possible lesson day becomes the day before: Jul 09.
+        series.CancelAsOf(new DateTimeOffset(2026, 7, 10, 0, 30, 0, TimeSpan.Zero));
+
+        // Assert
+        Assert.Equal(new DateOnly(2026, 7, 9), series.EndDate);
+    }
+
+    [Fact]
+    public void CancelAsOf_ExistingEarlierEndDate_TightensEndDateOnly()
+    {
+        // Arrange
+        var series = NewSeries(start: new DateOnly(2026, 1, 1), end: new DateOnly(2026, 6, 1));
+
+        // Act
+        // Local "today" is Jul 10 → cancel would set Jul 09, but the existing Jun 01 is earlier.
+        series.CancelAsOf(new DateTimeOffset(2026, 7, 10, 0, 30, 0, TimeSpan.Zero));
+
+        // Assert
+        Assert.Equal(new DateOnly(2026, 6, 1), series.EndDate);
+    }
+
+    [Fact]
+    public void CancelAsOf_SeriesStartingToday_ProducesNoOccurrences()
+    {
+        // Arrange
+        // Local "today" is Jul 10; the series starts that same local day.
+        var today = new DateOnly(2026, 7, 10);
+        var series = NewSeries(start: today, days: Weekdays.Friday); // Jul 10 2026 is a Friday
+        var now = new DateTimeOffset(2026, 7, 10, 0, 30, 0, TimeSpan.Zero);
+
+        // Act
+        series.CancelAsOf(now);
+
+        // Assert
+        Assert.Equal(new DateOnly(2026, 7, 9), series.EndDate); // yesterday < StartDate
+        Assert.Empty(series.GetOccurrences(today, new DateOnly(2026, 12, 31)));
     }
 
     [Fact]

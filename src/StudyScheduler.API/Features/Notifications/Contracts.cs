@@ -45,4 +45,12 @@ public interface INotificationSender
     /// short toast. A failure here is swallowed — it must not throw out of the webhook handler.
     /// </summary>
     Task AnswerCallbackAsync(string callbackQueryId, string? text, CancellationToken ct = default);
+
+    /// <summary>
+    /// Replaces a message's text and clears its inline keyboard, turning a tapped notification into a
+    /// non-re-tappable record of the outcome. Like <see cref="AnswerCallbackAsync"/>, a failure (an
+    /// edit rejected because the message is too old or its content is unchanged) is swallowed — it
+    /// must not throw out of the webhook handler.
+    /// </summary>
+    Task EditMessageAsync(long chatId, int messageId, string text, CancellationToken ct = default);
 }

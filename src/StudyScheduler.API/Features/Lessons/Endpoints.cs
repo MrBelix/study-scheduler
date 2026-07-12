@@ -197,15 +197,20 @@ internal static class Endpoints
     }
 
     /// <summary>
-    /// Ends a series as of today (in its own time zone): future virtual slots stop expanding, and
-    /// any future materialized overrides are removed and reported so the client can notify the user.
-    /// Past and today's lessons are untouched.
+    /// Cancels a series effective immediately (in its own time zone): its last possible lesson day
+    /// becomes yesterday, so today's virtual occurrence stops expanding along with all future ones.
+    /// Today's occurrence that has ALREADY STARTED (or is over) is materialized first, so it survives
+    /// as a physical <c>Scheduled</c> row — an in-progress/past lesson is never silently dropped. A
+    /// still-upcoming today occurrence (<c>StartUtc &gt; now</c>) is left virtual and correctly dropped.
+    /// Any future materialized overrides are removed and reported so the client can notify the user.
+    /// Existing materialized rows for today and the past are physical and left untouched.
     /// </summary>
     public static async Task<Results<Ok<CancelSeriesResponse>, NotFound>> CancelSeries(
         Guid seriesId,
         ClaimsPrincipal principal,
         ILessonSeriesRepository seriesRepo,
         ILessonRepository lessonRepo,
+        LessonMaterializer materializer,
         IUnitOfWork uow,
         TimeProvider clock,
         CancellationToken ct)
@@ -217,11 +222,29 @@ internal static class Endpoints
             return TypedResults.NotFound();
 
         var now = clock.GetUtcNow();
-        series.EndAsOf(now);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, series.Pattern.TimeZone).DateTime);
+
+        // Preserve today's already-happened occurrence. Evaluated BEFORE CancelAsOf (GetOccurrences
+        // clips to the CURRENT EndDate): a today occurrence that has already started/passed but is
+        // still virtual is materialized into a physical Scheduled row so it is not lost when EndDate is
+        // tightened to yesterday. A still-upcoming today occurrence is left alone and dropped.
+        foreach (var occ in series.GetOccurrences(today, today))
+        {
+            if (occ.StartUtc > now)
+                continue; // Still upcoming today → correctly dropped by CancelAsOf.
+
+            var existing = await lessonRepo.GetBySeriesOccurrenceAsync(seriesId, today, tutorId, track: true, ct);
+            if (existing is not null)
+                continue; // Already physical → survives untouched.
+
+            var lesson = await materializer.MaterializeSlotAsync(series, occ, ct);
+            lessonRepo.Add(lesson);
+        }
+
+        series.CancelAsOf(now);
 
         // Remove future overrides (materialized rows beyond today) — they belong to a schedule that
-        // no longer exists. Today's and past rows stay.
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, series.Pattern.TimeZone).DateTime);
+        // no longer exists. Today's (including the just-materialized) and past rows stay.
         var removed = await lessonRepo.GetMaterializedForSeriesFromAsync(seriesId, tutorId, today.AddDays(1), track: true, ct);
         foreach (var lesson in removed)
             lessonRepo.Remove(lesson);

@@ -108,9 +108,13 @@ public sealed class LessonSeries : Entity
             EndDate = lastDate;
     }
 
-    /// <summary>Ends the series as of "today" in its own time zone — see <see cref="End"/>.</summary>
-    public void EndAsOf(DateTimeOffset nowUtc) =>
-        End(DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(nowUtc, Pattern.TimeZone).DateTime));
+    /// <summary>
+    /// Cancels the series effective immediately: its last possible lesson day is the day BEFORE
+    /// "today" in its own time zone, so today onward stops expanding. Only ever tightens EndDate.
+    /// Physical (materialized) lessons are untouched — this affects virtual expansion only.
+    /// </summary>
+    public void CancelAsOf(DateTimeOffset nowUtc) =>
+        End(DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(nowUtc, Pattern.TimeZone).DateTime).AddDays(-1));
 
     /// <summary>
     /// Occurrences intersecting <c>[fromLocal, toLocal]</c> (inclusive), clipped to the series' own

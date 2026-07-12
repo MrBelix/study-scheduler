@@ -77,4 +77,28 @@ public sealed class TelegramBotSender(ITelegramBotClient bot, ILogger<TelegramBo
             logger.LogWarning(ex, "HTTP failure answering callback {CallbackQueryId}", callbackQueryId);
         }
     }
+
+    public async Task EditMessageAsync(long chatId, int messageId, string text, CancellationToken ct = default)
+    {
+        // Best-effort like the answer: the mutation already happened. A message too old to edit, or an
+        // identical-content edit, must not break the endpoint's 200 ack — log and swallow.
+        try
+        {
+            await bot.EditMessageText(chatId, messageId, text, replyMarkup: null, cancellationToken: ct);
+        }
+        catch (ApiRequestException ex)
+        {
+            logger.LogWarning(
+                ex, "Telegram API rejected edit of message {MessageId} in chat {ChatId} with code {ErrorCode}",
+                messageId, chatId, ex.ErrorCode);
+        }
+        catch (RequestException ex)
+        {
+            logger.LogWarning(ex, "Telegram request editing message {MessageId} in chat {ChatId} failed", messageId, chatId);
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogWarning(ex, "HTTP failure editing message {MessageId} in chat {ChatId}", messageId, chatId);
+        }
+    }
 }
