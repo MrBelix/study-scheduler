@@ -106,4 +106,40 @@ public class LessonTests
         Assert.False(result.IsSuccess);
         Assert.Equal("Lesson.UnknownStatus", Assert.Single(result.Errors).Code);
     }
+
+    [Fact]
+    public void Create_FreshLesson_HasNoNotificationsSent()
+    {
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+
+        Assert.Equal(NotificationState.None, lesson.Notifications);
+        Assert.False(lesson.Notifications.IsReminderSent);
+        Assert.False(lesson.Notifications.IsFollowUpSent);
+    }
+
+    [Fact]
+    public void MarkReminderSent_UpdatesNotificationState()
+    {
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+        var sentAt = StartUtc.AddMinutes(-30);
+
+        lesson.MarkReminderSent(sentAt);
+
+        Assert.True(lesson.Notifications.IsReminderSent);
+        Assert.Equal(sentAt, lesson.Notifications.ReminderSentAtUtc);
+        Assert.False(lesson.Notifications.IsFollowUpSent);
+    }
+
+    [Fact]
+    public void MarkFollowUpSent_UpdatesNotificationState()
+    {
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+        var sentAt = StartUtc.AddMinutes(60);
+
+        lesson.MarkFollowUpSent(sentAt);
+
+        Assert.True(lesson.Notifications.IsFollowUpSent);
+        Assert.Equal(sentAt, lesson.Notifications.FollowUpSentAtUtc);
+        Assert.False(lesson.Notifications.IsReminderSent);
+    }
 }

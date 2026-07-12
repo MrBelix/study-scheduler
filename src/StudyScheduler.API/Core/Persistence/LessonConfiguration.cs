@@ -41,6 +41,13 @@ internal sealed class LessonConfiguration : IEntityTypeConfiguration<Lesson>
         builder.Property(l => l.Topic).HasMaxLength(Lesson.MaxTopicLength);
         builder.Property(l => l.Description).HasMaxLength(Lesson.MaxDescriptionLength);
 
+        // Per-lesson notification dedup stored inline as flat, nullable columns.
+        builder.ComplexProperty(l => l.Notifications, n =>
+        {
+            n.Property(x => x.ReminderSentAtUtc).HasColumnName("ReminderSentAtUtc");
+            n.Property(x => x.FollowUpSentAtUtc).HasColumnName("FollowUpSentAtUtc");
+        });
+
         builder.Property(l => l.CreatedAtUtc);
     }
 }

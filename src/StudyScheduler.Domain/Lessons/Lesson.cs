@@ -16,6 +16,11 @@ public sealed class Lesson : Entity
     public const int MaxTopicLength = 200;
     public const int MaxDescriptionLength = 2000;
 
+    // EF materialization only: it sets every property (including the Notifications complex type) via
+    // their private setters. The domain constructor below can't be used because EF cannot bind a
+    // complex-type property to a constructor parameter.
+    private Lesson() : base(Guid.Empty) { }
+
     private Lesson(
         Guid id,
         long tutorTelegramId,
@@ -80,6 +85,9 @@ public sealed class Lesson : Entity
 
     /// <summary>Free-form notes / details for the lesson.</summary>
     public string? Description { get; private set; }
+
+    /// <summary>Which bot notifications have already been sent for this lesson (durable dedup).</summary>
+    public NotificationState Notifications { get; private set; } = NotificationState.None;
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
@@ -186,6 +194,12 @@ public sealed class Lesson : Entity
         Description = Normalize(description);
         return Result.Success();
     }
+
+    /// <summary>Records that the pre-lesson reminder was sent at <paramref name="sentAtUtc"/>.</summary>
+    public void MarkReminderSent(DateTimeOffset sentAtUtc) => Notifications = Notifications.WithReminderSent(sentAtUtc);
+
+    /// <summary>Records that the after-lesson follow-up was sent at <paramref name="sentAtUtc"/>.</summary>
+    public void MarkFollowUpSent(DateTimeOffset sentAtUtc) => Notifications = Notifications.WithFollowUpSent(sentAtUtc);
 
     private static Error? ValidateDuration(int durationMinutes) =>
         durationMinutes is < MinDurationMinutes or > MaxDurationMinutes

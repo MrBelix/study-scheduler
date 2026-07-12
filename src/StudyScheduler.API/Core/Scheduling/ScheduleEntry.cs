@@ -22,7 +22,8 @@ public sealed record ScheduleEntry(
     string? Topic,
     string? Description,
     bool IsVirtual,
-    DateTimeOffset CreatedAtUtc)
+    DateTimeOffset CreatedAtUtc,
+    NotificationState Notifications)
 {
     public static ScheduleEntry From(Lesson lesson) => new(
         lesson.Id,
@@ -38,7 +39,8 @@ public sealed record ScheduleEntry(
         lesson.Topic,
         lesson.Description,
         IsVirtual: false,
-        lesson.CreatedAtUtc);
+        lesson.CreatedAtUtc,
+        lesson.Notifications);
 
     /// <summary>An unmaterialized series slot generated in memory for the requested range.</summary>
     public static ScheduleEntry Virtual(LessonSeries series, LessonOccurrence occurrence, decimal price) => new(
@@ -55,5 +57,6 @@ public sealed record ScheduleEntry(
         Topic: null,
         Description: null,
         IsVirtual: true,
-        series.CreatedAtUtc);
+        series.CreatedAtUtc,
+        NotificationState.None);
 }
