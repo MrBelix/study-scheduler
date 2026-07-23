@@ -11,14 +11,13 @@ public class TelegramInitDataValidatorTests
     private const string UserJson =
         """{"id":42,"first_name":"Alice","last_name":"Doe","username":"alice","is_premium":true}""";
 
-    private static TelegramInitDataValidator CreateValidator(TimeSpan? maxAge = null)
+    private static TelegramInitDataValidator CreateValidator()
     {
         var options = Options.Create(new TelegramAuthOptions
         {
             BotToken = TelegramInitDataFactory.BotToken,
-            MaxAuthAge = maxAge ?? TimeSpan.FromHours(24),
         });
-        return new TelegramInitDataValidator(options, new FixedClock(Now));
+        return new TelegramInitDataValidator(options);
     }
 
     private static Dictionary<string, string> ValidFields() => new()
@@ -80,17 +79,20 @@ public class TelegramInitDataValidatorTests
         Assert.Equal(TelegramAuthError.InvalidSignature, error);
     }
 
+    // initData never refreshes inside a running WebView, so an old auth_date must
+    // still authenticate — only the signature gates access.
     [Fact]
-    public void Validate_ExpiredAuthDate_ReturnsExpired()
+    public void Validate_OldAuthDate_StillReturnsNone()
     {
         var fields = ValidFields();
-        fields["auth_date"] = Now.AddHours(-25).ToUnixTimeSeconds().ToString();
+        fields["auth_date"] = Now.AddDays(-30).ToUnixTimeSeconds().ToString();
 
         var initData = TelegramInitDataFactory.Query(fields);
 
-        var error = CreateValidator().Validate(initData, out _);
+        var error = CreateValidator().Validate(initData, out var user);
 
-        Assert.Equal(TelegramAuthError.Expired, error);
+        Assert.Equal(TelegramAuthError.None, error);
+        Assert.NotNull(user);
     }
 
     [Fact]
@@ -127,10 +129,5 @@ public class TelegramInitDataValidatorTests
 
         Assert.Equal(TelegramAuthError.MissingData, error);
         Assert.Null(user);
-    }
-
-    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
     }
 }

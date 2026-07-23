@@ -32,8 +32,8 @@ Features/                   Vertical slices
 ## Authentication
 
 Requests carry `Authorization: tma <initData>`. `TelegramAuthenticationHandler` validates the init
-data on every request (HMAC-SHA256 over the data-check-string + `auth_date` freshness) and projects
-the Telegram user into claims. The tutor id (`long`) is read from the principal — never from the
+data on every request (HMAC-SHA256 over the data-check-string; no `auth_date` TTL — initData never
+refreshes in a running WebView) and projects the Telegram user into claims. The tutor id (`long`) is read from the principal — never from the
 request body. Use `ClaimsPrincipalExtensions.GetTelegramId()` as the single access point.
 
 ## Persistence

@@ -15,7 +15,7 @@ public static class AuthenticationExtensions
         // TelegramAuthenticationHandler (an AuthenticationHandler<TelegramAuthOptions>) resolves
         // its Options via IOptionsMonitor.Get(Scheme.Name), while TelegramInitDataValidator and
         // TelegramBotClient read the unnamed IOptions<> above. Without this named binding the
-        // handler would see an empty BotToken and a default MaxAuthAge. Do not merge the two.
+        // handler would see an empty BotToken. Do not merge the two.
         services.AddOptions<TelegramAuthOptions>(TelegramAuthOptions.Scheme)
             .BindConfiguration("TelegramAuth");
         services.AddSingleton<TelegramInitDataValidator>();

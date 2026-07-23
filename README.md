@@ -164,7 +164,8 @@ SQL**. On Linux the App Service **Startup Command** must be `dotnet StudySchedul
 
 Every request carries `Authorization: tma <initData>`. A custom `AuthenticationHandler` validates the
 init data on **every** request (no server-side session): it verifies the HMAC-SHA256 signature over
-the data-check-string, checks `auth_date` freshness, and projects the Telegram user into claims. This
+the data-check-string and projects the Telegram user into claims. There is no `auth_date` TTL —
+initData never refreshes inside a running WebView, so an expiry check would lock out long-lived sessions. This
 suits a Mini App, where Telegram already signs fresh init data on each launch — so there's no login
 flow or session to manage.
 

@@ -11,7 +11,6 @@ public enum TelegramAuthError
     None,
     MissingData,
     InvalidSignature,
-    Expired,
 }
 
 /// <summary>
@@ -19,22 +18,20 @@ public enum TelegramAuthError
 /// https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app.
 /// The HMAC secret key is derived once from the bot token (it is constant for the
 /// process lifetime), so each request only pays for one HMAC over the check string.
+/// No <c>auth_date</c> freshness check: initData is fixed at app launch and never
+/// refreshes, so any TTL eventually locks out a long-lived WebView session.
 /// </summary>
 public sealed class TelegramInitDataValidator
 {
-    private readonly TelegramAuthOptions _options;
-    private readonly TimeProvider _clock;
     private readonly byte[] _secretKey;
 
-    public TelegramInitDataValidator(IOptions<TelegramAuthOptions> options, TimeProvider clock)
+    public TelegramInitDataValidator(IOptions<TelegramAuthOptions> options)
     {
-        _options = options.Value;
-        _clock = clock;
-        _secretKey = TelegramInitData.DeriveSecretKey(_options.BotToken);
+        _secretKey = TelegramInitData.DeriveSecretKey(options.Value.BotToken);
     }
 
     /// <summary>
-    /// Verifies the signature and freshness of <paramref name="initData"/> and, on success,
+    /// Verifies the signature of <paramref name="initData"/> and, on success,
     /// returns the embedded user. Returns the specific failure reason otherwise.
     /// </summary>
     public TelegramAuthError Validate(string initData, out TelegramUser? user)
@@ -68,15 +65,6 @@ public sealed class TelegramInitDataValidator
 
         if (!CryptographicOperations.FixedTimeEquals(computed, providedBytes))
             return TelegramAuthError.InvalidSignature;
-
-        // auth_date is inside the signed payload, so we only trust it after the HMAC check passes.
-        if (!parsed.TryGetValue("auth_date", out var authDateRaw) ||
-            !long.TryParse(authDateRaw, out var authUnix))
-            return TelegramAuthError.MissingData;
-
-        var authDate = DateTimeOffset.FromUnixTimeSeconds(authUnix);
-        if (_clock.GetUtcNow() - authDate > _options.MaxAuthAge)
-            return TelegramAuthError.Expired;
 
         if (!parsed.TryGetValue("user", out var userValues) ||
             userValues.ToString() is not { Length: > 0 } userJson)

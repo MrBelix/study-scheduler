@@ -63,7 +63,6 @@ public sealed class TelegramAuthenticationHandler(
     {
         var (code, title) = _error switch
         {
-            TelegramAuthError.Expired => ("expired", "Telegram init data has expired."),
             TelegramAuthError.InvalidSignature => ("invalid_signature", "Telegram init data signature is invalid."),
             TelegramAuthError.MissingData => ("missing_data", "Telegram init data is missing or malformed."),
             _ => ("unauthorized", "Authentication is required."),
@@ -74,8 +73,7 @@ public sealed class TelegramAuthenticationHandler(
 
         // RFC 7807 body, aligned with every other API failure. The top-level "error" member is
         // a ProblemDetails extension the frontend contract depends on: ApiError.fromResponse
-        // reads `body.error` as the machine code and flags "expired" as the auth-expired
-        // terminal state — it must survive any reshaping of this payload.
+        // reads `body.error` as the machine code — it must survive any reshaping of this payload.
         var problem = new ProblemDetails
         {
             Status = StatusCodes.Status401Unauthorized,
