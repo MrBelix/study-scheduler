@@ -4,7 +4,7 @@ using StudyScheduler.Domain.Lessons;
 
 namespace StudyScheduler.API.Features.Lessons;
 
-/// <summary>EF Core implementation of <see cref="ILessonSeriesRepository"/> (SQL Server).</summary>
+/// <summary>EF Core implementation of <see cref="ILessonSeriesRepository"/> (PostgreSQL).</summary>
 public sealed class EfLessonSeriesRepository(AppDbContext db) : ILessonSeriesRepository
 {
     public async Task<LessonSeries?> GetByIdAsync(

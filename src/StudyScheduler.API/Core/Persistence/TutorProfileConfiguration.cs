@@ -17,8 +17,7 @@ internal sealed class TutorProfileConfiguration : IEntityTypeConfiguration<Tutor
 
         builder.Property(p => p.TimeZone).IsRequired().HasColumnName("TimeZoneId").HasTimeZoneConversion();
 
-        // Store the enum as its lowercase two-letter code — the column stays nvarchar(2), so
-        // existing "uk"/"en" rows keep working with no data migration. EF applies this
+        // Store the enum as its lowercase two-letter code in a varchar(2) column. EF applies this
         // non-nullable converter to the nullable property; DB NULL maps to a null language.
         builder.Property(p => p.LanguageCode)
             .HasConversion(new ValueConverter<AppLanguage, string>(

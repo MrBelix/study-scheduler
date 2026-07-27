@@ -20,12 +20,11 @@ internal sealed class LessonConfiguration : IEntityTypeConfiguration<Lesson>
         builder.Property(l => l.SeriesId);
         builder.Property(l => l.OccurrenceDate);
 
-        // One physical row per materialized series slot. Filtered so one-off lessons
-        // (SeriesId null) don't collide on a shared NULL key — SQL Server treats NULLs as equal
-        // in a unique index otherwise.
+        // One physical row per materialized series slot. Partial index: one-off lessons (SeriesId
+        // null) are kept out of it entirely, so the index only ever guards real series slots.
         builder.HasIndex(l => new { l.SeriesId, l.OccurrenceDate })
             .IsUnique()
-            .HasFilter("[SeriesId] IS NOT NULL");
+            .HasFilter("\"SeriesId\" IS NOT NULL");
 
         builder.Property(l => l.StartUtc).IsRequired();
         builder.Property(l => l.EndUtc).IsRequired();

@@ -6,7 +6,7 @@ using StudyScheduler.API.Core.Persistence;
 namespace StudyScheduler.IntegrationTests;
 
 /// <summary>
-/// Boots the whole Aspire app (SQL Server container + API) once and shares it across the test
+/// Boots the whole Aspire app (PostgreSQL container + API) once and shares it across the test
 /// collection — starting the container is expensive, so we pay it a single time.
 /// </summary>
 public sealed class AppFixture : IAsyncLifetime
@@ -23,7 +23,7 @@ public sealed class AppFixture : IAsyncLifetime
     /// </summary>
     public AppDbContext CreateDbContext() =>
         new(new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(_dbConnectionString)
+            .UseNpgsql(_dbConnectionString)
             .Options);
 
     public async Task InitializeAsync()
@@ -32,7 +32,7 @@ public sealed class AppFixture : IAsyncLifetime
         builder.Services.AddLogging(logging =>
         {
             logging.SetMinimumLevel(LogLevel.Warning);
-            // Suppress the piped stdout of the SQL container and the API (EF commands, HTTP logs).
+            // Suppress the piped stdout of the database container and the API (EF commands, HTTP logs).
             logging.AddFilter("StudyScheduler.AppHost.Resources", LogLevel.Warning);
             logging.AddFilter("Aspire.Hosting", LogLevel.Warning);
         });

@@ -8,8 +8,8 @@ namespace StudyScheduler.API.Features.Lessons;
 /// lessons via SQL and active series analytically (computing their occurrences), so slots of
 /// open-ended series are protected even before they are materialized.
 ///
-/// The check-then-insert flow can race (SQL Server has no range-exclusion constraint), but the
-/// tenant is a single human tutor — the realistic race is a double-click — so this is accepted.
+/// The check-then-insert flow can race (no range-exclusion constraint backs it), but the tenant is
+/// a single human tutor — the realistic race is a double-click — so this is accepted.
 /// </summary>
 public sealed class LessonOverlapChecker(
     ILessonRepository lessons,

@@ -1,8 +1,9 @@
 # StudyScheduler.IntegrationTests
 
-**End-to-end integration tests** over the real stack: the Aspire AppHost boots a **real SQL Server
-container** plus the API, and requests go through the **real Telegram auth pipeline**. This verifies
-behaviour that unit tests can't — persistence, scoping, and auth wired together.
+**End-to-end integration tests** over the real stack: the Aspire AppHost boots a **real PostgreSQL
+container** — the same engine production runs — plus the API, and requests go through the **real
+Telegram auth pipeline**. This verifies behaviour that unit tests can't — persistence, scoping, and
+auth wired together.
 
 **Requires Docker.**
 
@@ -18,7 +19,7 @@ StudentsScopeTests.cs    A tutor cannot reach another tutor's students (404 / sc
 ## How it works
 
 - `AppFixture` uses `Aspire.Hosting.Testing` to start the whole app **once per collection** (starting
-  the SQL container is expensive) and exposes an authenticated-friendly `HttpClient`.
+  the database container is expensive) and exposes an authenticated-friendly `HttpClient`.
 - The client talks to the API's HTTPS endpoint with certificate validation bypassed — the ASP.NET dev
   cert isn't trusted on CI (Linux) runners.
 - Tests authenticate by minting init data signed with the same fixed test bot token the AppHost

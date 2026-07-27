@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 
 namespace StudyScheduler.IntegrationTests;
 
-/// <summary>End-to-end tests for the Lessons feature over the real stack (SQL container + API).</summary>
+/// <summary>End-to-end tests for the Lessons feature over the real stack (PostgreSQL container + API).</summary>
 [Collection(nameof(AppCollection))]
 public class LessonsTests(AppFixture app)
 {
@@ -77,6 +77,24 @@ public class LessonsTests(AppFixture app)
 
         Assert.NotNull(result.Series.EndDate);
         Assert.Contains(result.RemovedLessons, l => l.OccurrenceDate == monday);
+    }
+
+    [Fact]
+    public async Task OneOff_created_with_non_utc_offset_persists_the_same_instant()
+    {
+        // PostgreSQL timestamptz stores a plain instant and Npgsql refuses a non-zero offset, so a
+        // client sending its local offset must still round-trip to the identical moment in time.
+        var tutor = TelegramInitData.ForUser(4008, "Al");
+        var studentId = await CreateStudent(tutor);
+        var start = FutureUtc(days: 6, hour: 10).ToOffset(TimeSpan.FromHours(3));
+
+        var create = await app.Api.PostAs(tutor, "/lessons", new { studentId, startUtc = start, durationMinutes = 60 });
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+        var read = await app.Api.GetAs(tutor, $"/lessons/{(await create.Content.ReadFromJsonAsync<LessonDto>())!.Id}");
+        var lesson = (await read.Content.ReadFromJsonAsync<LessonDto>())!;
+        Assert.Equal(start.UtcDateTime, lesson.StartUtc.UtcDateTime);
+        Assert.Equal(TimeSpan.Zero, lesson.StartUtc.Offset);
     }
 
     [Fact]

@@ -1,10 +1,11 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-// SQL Server runs as a container (mcr.microsoft.com/mssql/server) with an auto-generated
-// password. The database resource is named "Default" so the API receives it as the
-// "ConnectionStrings:Default" connection string via WithReference.
-var db = builder.AddSqlServer("sql")
-    .AddDatabase("Default");
+// PostgreSQL runs as a container (docker.io/library/postgres) with an auto-generated password —
+// the same engine production runs on. The database resource is named "Default" so the API receives
+// it as the "ConnectionStrings:Default" connection string via WithReference; the physical database
+// is lowercase because PostgreSQL identifiers are case-sensitive.
+var db = builder.AddPostgres("postgres")
+    .AddDatabase("Default", "studyscheduler");
 
 // Telegram bot token: real value comes from AppHost user-secrets locally; falls back to the
 // fixed test token so integration tests can mint matching initData against the same token.

@@ -3,8 +3,8 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StudyScheduler.API.Core.Persistence;
 
 #nullable disable
@@ -19,56 +19,56 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasAnnotation("ProductVersion", "10.0.8")
-                .HasAnnotation("Relational:MaxIdentifierLength", 128);
+                .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("StudyScheduler.Domain.Lessons.Lesson", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
+                        .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
                         .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<int>("DurationMinutes")
-                        .HasColumnType("int");
+                        .HasColumnType("integer");
 
-                    b.Property<DateTimeOffset>("EndUtc")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("EndUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("IsPaid")
-                        .HasColumnType("bit");
+                        .HasColumnType("boolean");
 
                     b.Property<DateOnly?>("OccurrenceDate")
                         .HasColumnType("date");
 
                     b.Property<decimal>("Price")
                         .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<Guid?>("SeriesId")
-                        .HasColumnType("uniqueidentifier");
+                        .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset>("StartUtc")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("StartUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
+                        .HasColumnType("character varying(20)");
 
                     b.Property<Guid>("StudentId")
-                        .HasColumnType("uniqueidentifier");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Topic")
                         .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
+                        .HasColumnType("character varying(200)");
 
                     b.Property<long>("TutorTelegramId")
                         .HasColumnType("bigint");
@@ -77,12 +77,12 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                         {
                             b1.IsRequired();
 
-                            b1.Property<DateTimeOffset?>("FollowUpSentAtUtc")
-                                .HasColumnType("datetimeoffset")
+                            b1.Property<DateTime?>("FollowUpSentAtUtc")
+                                .HasColumnType("timestamp with time zone")
                                 .HasColumnName("FollowUpSentAtUtc");
 
-                            b1.Property<DateTimeOffset?>("ReminderSentAtUtc")
-                                .HasColumnType("datetimeoffset")
+                            b1.Property<DateTime?>("ReminderSentAtUtc")
+                                .HasColumnType("timestamp with time zone")
                                 .HasColumnName("ReminderSentAtUtc");
                         });
 
@@ -90,7 +90,7 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
 
                     b.HasIndex("SeriesId", "OccurrenceDate")
                         .IsUnique()
-                        .HasFilter("[SeriesId] IS NOT NULL");
+                        .HasFilter("\"SeriesId\" IS NOT NULL");
 
                     b.HasIndex("TutorTelegramId", "StartUtc");
 
@@ -101,27 +101,27 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
+                        .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateOnly?>("EndDate")
                         .HasColumnType("date");
 
                     b.Property<decimal?>("Price")
                         .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date");
 
                     b.Property<Guid>("StudentId")
-                        .HasColumnType("uniqueidentifier");
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Title")
                         .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
+                        .HasColumnType("character varying(200)");
 
                     b.Property<long>("TutorTelegramId")
                         .HasColumnType("bigint");
@@ -131,21 +131,21 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                             b1.IsRequired();
 
                             b1.Property<int>("Days")
-                                .HasColumnType("int")
+                                .HasColumnType("integer")
                                 .HasColumnName("Weekdays");
 
                             b1.Property<int>("DurationMinutes")
-                                .HasColumnType("int")
+                                .HasColumnType("integer")
                                 .HasColumnName("DurationMinutes");
 
                             b1.Property<TimeOnly>("StartTimeLocal")
-                                .HasColumnType("time")
+                                .HasColumnType("time without time zone")
                                 .HasColumnName("StartTimeLocal");
 
                             b1.Property<string>("TimeZone")
                                 .IsRequired()
                                 .HasMaxLength(100)
-                                .HasColumnType("nvarchar(100)")
+                                .HasColumnType("character varying(100)")
                                 .HasColumnName("TimeZoneId");
                         });
 
@@ -162,24 +162,24 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
+                        .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
+                        .HasColumnType("character varying(200)");
 
                     b.Property<decimal>("Rate")
                         .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
+                        .HasColumnType("character varying(20)");
 
                     b.Property<long>("TutorTelegramId")
                         .HasColumnType("bigint");
@@ -198,26 +198,26 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
 
                     b.Property<bool>("BotReachable")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
+                        .HasColumnType("boolean")
                         .HasDefaultValue(true);
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("LanguageCode")
                         .HasMaxLength(2)
-                        .HasColumnType("nvarchar(2)");
+                        .HasColumnType("character varying(2)");
 
                     b.Property<bool>("NotifyAfterLesson")
-                        .HasColumnType("bit");
+                        .HasColumnType("boolean");
 
                     b.Property<int?>("RemindMinutes")
-                        .HasColumnType("int");
+                        .HasColumnType("integer");
 
                     b.Property<string>("TimeZone")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("TimeZoneId");
 
                     b.HasKey("TelegramUserId");

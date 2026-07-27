@@ -15,6 +15,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     public DbSet<Lesson> Lessons => Set<Lesson>();
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        // Applies to DateTimeOffset and DateTimeOffset? alike — see UtcTimestampConversion.
+        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<UtcTimestampConversion>();
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

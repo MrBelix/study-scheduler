@@ -4,7 +4,7 @@ using StudyScheduler.Domain.Tutors;
 
 namespace StudyScheduler.API.Features.Profile;
 
-/// <summary>EF Core implementation of <see cref="ITutorProfileRepository"/> (SQL Server).</summary>
+/// <summary>EF Core implementation of <see cref="ITutorProfileRepository"/> (PostgreSQL).</summary>
 public sealed class EfTutorProfileRepository(AppDbContext db) : ITutorProfileRepository
 {
     public async Task<TutorProfile?> GetAsync(long telegramUserId, CancellationToken ct = default) =>

@@ -4,7 +4,7 @@ using StudyScheduler.Domain.Students;
 
 namespace StudyScheduler.API.Features.Students;
 
-/// <summary>EF Core implementation of <see cref="IStudentRepository"/> (SQL Server).</summary>
+/// <summary>EF Core implementation of <see cref="IStudentRepository"/> (PostgreSQL).</summary>
 public sealed class EfStudentRepository(AppDbContext db) : IStudentRepository
 {
     public async Task<Student?> GetByIdAsync(

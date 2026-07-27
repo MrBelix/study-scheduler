@@ -9,7 +9,7 @@ Declarative and short. It composes the app from extension methods:
 
 ```csharp
 builder.AddServiceDefaults();          // Aspire: OTel, health, resilience
-builder.AddPersistence();              // EF Core / SQL Server
+builder.AddPersistence();              // EF Core / PostgreSQL
 builder.Services.AddTelegramAuthentication();
 builder.Services.AddMiniAppCors(...);
 builder.Services.AddStudentsFeature(); // one line per feature
@@ -38,10 +38,15 @@ request body. Use `ClaimsPrincipalExtensions.GetTelegramId()` as the single acce
 
 ## Persistence
 
-`AddPersistence()` registers `AppDbContext` via the Aspire SQL client integration
-(`AddSqlServerDbContext<AppDbContext>("Default")`); `app.ApplyMigrations()` applies pending migrations
+`AddPersistence()` registers `AppDbContext` via the Aspire Npgsql client integration
+(`AddNpgsqlDbContext<AppDbContext>("Default")`); `app.ApplyMigrations()` applies pending migrations
 on startup. Connection string comes from configuration (`ConnectionStrings:Default`) — a local
-container via the AppHost, or Azure SQL in production.
+PostgreSQL container via the AppHost, or the Dokploy database service in production.
+
+Instants are `DateTimeOffset` mapped to `timestamp with time zone` and forced to a zero offset by
+`UtcTimestampConversion` (a model-wide convention in `AppDbContext.ConfigureConventions`), because
+Npgsql refuses to write a non-zero offset to `timestamptz`. Wall-clock times are `TimeOnly` +
+an IANA zone id, and dates are `DateOnly` — so no column needs `timestamp without time zone`.
 
 Add a migration:
 

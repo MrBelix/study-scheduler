@@ -12,7 +12,7 @@ public static class PersistenceExtensions
     /// </summary>
     public static void AddPersistence(this IHostApplicationBuilder builder)
     {
-        builder.AddSqlServerDbContext<AppDbContext>("Default");
+        builder.AddNpgsqlDbContext<AppDbContext>("Default");
         builder.Services.AddScoped<IUnitOfWork, EfUnitOfWork>();
     }
 

@@ -5,8 +5,8 @@ namespace StudyScheduler.API.Core.Persistence;
 
 /// <summary>
 /// Design-time factory used by <c>dotnet ef</c>. Reads <c>ConnectionStrings:Default</c> from
-/// user-secrets / environment so `ef database update` targets the real database (e.g. Azure SQL).
-/// Falls back to a local placeholder — enough to generate migrations offline.
+/// user-secrets / environment so `ef database update` targets the real database. Falls back to a
+/// local placeholder — enough to generate migrations offline, with no PostgreSQL server running.
 /// </summary>
 internal sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
 {
@@ -18,10 +18,10 @@ internal sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbCon
             .Build();
 
         var connectionString = configuration.GetConnectionString("Default")
-            ?? "Server=localhost;Database=StudyScheduler;Trusted_Connection=True;TrustServerCertificate=True";
+            ?? "Host=localhost;Port=5432;Database=studyscheduler;Username=postgres;Password=postgres";
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connectionString)
+            .UseNpgsql(connectionString)
             .Options;
 
         return new AppDbContext(options);

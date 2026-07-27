@@ -1,7 +1,6 @@
-# Build, test and deploy the API to Azure App Service.
-# Tests (unit + integration) gate the deploy; only the API project is published
-# (publishing the whole solution mashes every project into one folder → 500.30).
-name: Build and deploy ASP.Net Core app to Azure Web App - StudyScheduler
+# CI: run unit + integration tests on pushes and PRs to main.
+# Deployment is handled by Dokploy (builds the Dockerfile on push to main) — no deploy job here.
+name: CI
 
 on:
   push:
@@ -22,7 +21,7 @@ jobs:
       - run: dotnet test tests/StudyScheduler.Tests/StudyScheduler.Tests.csproj --configuration Release
 
   integration:
-    name: Integration tests (Aspire + SQL Server)
+    name: Integration tests (Aspire + PostgreSQL)
     runs-on: ubuntu-latest # ubuntu runners ship a running Docker daemon that Aspire uses
     steps:
       - uses: actions/checkout@v4
@@ -30,45 +29,3 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet test tests/StudyScheduler.IntegrationTests/StudyScheduler.IntegrationTests.csproj --configuration Release
-
-  build:
-    name: Publish API
-    needs: [unit, integration]
-    if: github.event_name != 'pull_request' # publish/deploy only after tests pass on main
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Publish API (this project only — not the whole solution)
-        run: dotnet publish src/StudyScheduler.API/StudyScheduler.API.csproj -c Release -o ./publish
-      - uses: actions/upload-artifact@v4
-        with:
-          name: api
-          path: ./publish
-
-  deploy:
-    name: Deploy to Azure App Service
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write # required for OIDC azure/login
-      contents: read
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: api
-          path: ./publish
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_D8D57B1C72774A2886795B4ED5C9B66D }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_E9D5B947139540E3ABD6A2EF07FAB286 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_FFC8FAB5D31D48929DBFF48F15B90B0B }}
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: 'StudyScheduler'
-          slot-name: 'Production'
-          package: ./publish

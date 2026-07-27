@@ -33,7 +33,7 @@ Goal: run the whole backend on your machine and see it respond. Requires **Docke
    dotnet user-secrets set "TelegramAuth:BotToken" "<token>" --project host/StudyScheduler.AppHost
    ```
 
-2. Start everything via .NET Aspire — this spins up a SQL Server container, the API, and the Aspire
+2. Start everything via .NET Aspire — this spins up a PostgreSQL container, the API, and the Aspire
    dashboard:
 
    ```bash
@@ -89,8 +89,9 @@ repo. To allow the frontend in production, set `Cors__AllowedOrigins__0` to its 
 
 ### Deploy
 
-Push to `main` — the GitHub Actions pipeline runs tests, then (only if they pass) publishes the API
-and deploys to Azure App Service. See [CI/CD](#cicd) under Reference for the details.
+Push to `main` — **Dokploy** builds `Dockerfile` from the repo root and restarts the container, while
+GitHub Actions runs the test suites. See [Deployment](#deployment) under Reference for the required
+environment variables.
 
 ---
 
@@ -101,12 +102,12 @@ and deploys to Azure App Service. See [CI/CD](#cicd) under Reference for the det
 | Layer | Technology |
 |---|---|
 | Runtime | C# / .NET 10, ASP.NET Core (Minimal APIs) |
-| Persistence | EF Core → SQL Server / **Azure SQL** (serverless) |
+| Persistence | EF Core → **PostgreSQL** (Npgsql) |
 | Orchestration | .NET Aspire (local dev + integration tests) |
 | Auth | Telegram Mini App `initData` (HMAC-SHA256) |
 | API docs | OpenAPI + Scalar (Development only) |
 | Tests | xUnit (unit + Aspire integration) |
-| CI/CD | GitHub Actions → Azure App Service (Linux) |
+| CI/CD | GitHub Actions (tests) + Dokploy (Docker build & deploy) |
 
 ### Solution layout
 
@@ -116,11 +117,11 @@ StudyScheduler.slnx
 │   ├── StudyScheduler.API/          ASP.NET Core Web API (entry point)
 │   └── StudyScheduler.Domain/       Domain model — no external dependencies
 ├── host/
-│   ├── StudyScheduler.AppHost/      .NET Aspire orchestrator (SQL Server + API)
+│   ├── StudyScheduler.AppHost/      .NET Aspire orchestrator (PostgreSQL + API)
 │   └── StudyScheduler.ServiceDefaults/  Shared OTel / health checks / resilience
 └── tests/
     ├── StudyScheduler.Tests/            Unit tests (domain + auth validator)
-    └── StudyScheduler.IntegrationTests/ End-to-end tests over a real SQL container
+    └── StudyScheduler.IntegrationTests/ End-to-end tests over a real PostgreSQL container
 ```
 
 Each project's `README.md` documents it in detail.
@@ -134,27 +135,58 @@ The endpoint reference is the **live OpenAPI document** — browse it via the Sc
 ### Configuration
 
 Runtime configuration is read from standard .NET config (`appsettings`, environment variables,
-user-secrets, or App Service settings). Environment variables use `__` for nested keys.
+user-secrets). Environment variables use `__` for nested keys. **No secret is committed** —
+`appsettings.json` holds only non-sensitive defaults.
 
-| Key | Notes |
-|---|---|
-| `TelegramAuth__BotToken` | **Required** — the app fails to start without it |
-| `ConnectionStrings__Default` | SQL Server / Azure SQL connection string (App Service: a `Default` connection string of type `SQLAzure`) |
-| `Cors__AllowedOrigins__0` | Frontend origin(s) allowed in production |
+| Key | Required | Notes |
+|---|---|---|
+| `ConnectionStrings__Default` | **yes** | PostgreSQL connection string, e.g. `Host=studyscheduler-db;Port=5432;Database=studyscheduler;Username=studyscheduler;Password=<password>` |
+| `TelegramAuth__BotToken` | **yes** | Bot token from [@BotFather](https://t.me/BotFather); the app refuses to start without it |
+| `TelegramAuth__MaxAuthAge` | no | `d.hh:mm:ss`, default `1.00:00:00` |
+| `Cors__AllowedOrigins__0` | **yes in production** | Mini App origin, e.g. `https://app.example.org`. Add `__1`, `__2`, … for more. Left empty in production, **no** cross-origin request is allowed |
+| `Notifications__WebhookUrl` | no | Public HTTPS URL Telegram POSTs updates to, e.g. `https://api.example.org/telegram/webhook`. Empty means poller-only mode, nothing registered with Telegram |
+| `Notifications__WebhookSecret` | with `WebhookUrl` | Shared secret echoed back in `X-Telegram-Bot-Api-Secret-Token`; the endpoint 404s without it |
+| `Notifications__PollIntervalMinutes` | no | Default `1` |
+| `Notifications__FollowUpLookbackMinutes` | no | Default `60` |
+| `RateLimiting__Write__PermitLimit` | no | Default `60` |
+| `RateLimiting__Write__WindowSeconds` | no | Default `60` |
+| `ASPNETCORE_ENVIRONMENT` | no | Defaults to `Production` |
+| `ASPNETCORE_URLS` | no | **Baked into the image** as `http://+:8080` — don't override |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | no | Ships traces/metrics/logs to an OTLP collector; unset means no exporter |
 
-### CI/CD
+### Deployment
 
-`.github/workflows/main_studyscheduler.yml` runs one pipeline on push to `main`:
+Production is **self-hosted via [Dokploy](https://dokploy.com/)**. On push to `main` Dokploy builds
+`Dockerfile` (build context = this repo root) and restarts the container:
 
 ```
-unit ─┐
-      ├─► build (publishes ONLY the API project) ─► deploy (OIDC → Azure App Service)
-integration ─┘
+push to main ─► Dokploy: docker build -f Dockerfile . ─► container (plain HTTP :8080)
+                                                          │
+GitHub Actions: unit + integration tests (parallel)       └─► Traefik terminates TLS
 ```
 
-Deploy runs only after both test suites pass. Production is **Azure App Service (Linux)** + **Azure
-SQL**. On Linux the App Service **Startup Command** must be `dotnet StudyScheduler.API.dll`
-(Configuration → Stack settings), otherwise the startup script can't pick an entry point.
+- The container serves **plain HTTP on 8080** (`ASPNETCORE_URLS` is baked into the image, `EXPOSE
+  8080` is declared). Traefik in front of it terminates TLS — do **not** add a certificate to the
+  container.
+- **PostgreSQL** runs as a separate Dokploy service on the same internal Docker network; reach it by
+  its service hostname (e.g. `studyscheduler-db:5432`), never over the public internet.
+- **Migrations apply themselves on startup** (`app.ApplyMigrations()`), so a deploy that adds a
+  migration needs no extra step. This assumes a single instance — scale out only after moving to an
+  explicit `dotnet ef database update` step.
+- **Health probes**, mapped in every environment:
+
+  | Route | Meaning |
+  |---|---|
+  | `GET /alive` | Liveness — the process is responsive. Point the uptime monitor here. |
+  | `GET /health` | Readiness — includes the database connection, so it fails while PostgreSQL is unreachable. |
+
+- The startup log line `Cannot load library libgssapi_krb5.so.2` is **benign**: Npgsql probes for
+  Kerberos support, which the runtime image doesn't ship and this deployment doesn't use.
+
+#### CI
+
+`.github/workflows/main_studyscheduler.yml` runs the unit and integration suites on every push and
+PR to `main`. It does **not** deploy — Dokploy owns that.
 
 ---
 
@@ -175,12 +207,19 @@ already a stable, unique identity, and a surrogate account would only add a look
 
 ### Persistence
 
-EF Core on SQL Server. The DbContext is registered through the Aspire SQL client integration
-(`AddSqlServerDbContext<AppDbContext>("Default")`, giving health checks + retries + telemetry), and
-pending migrations are applied on startup. The connection string comes from configuration: a real SQL
-Server container locally (via the AppHost) or Azure SQL in production. **Money is always `decimal`;
-timestamps are UTC** — these are expensive to change once data exists, so they're fixed from the
-start.
+EF Core on PostgreSQL. The DbContext is registered through the Aspire Npgsql client integration
+(`AddNpgsqlDbContext<AppDbContext>("Default")`, giving health checks + retries + telemetry), and
+pending migrations are applied on startup. The connection string comes from configuration: a real
+PostgreSQL container locally (via the AppHost) or the Dokploy database service in production.
+**Money is always `decimal`; timestamps are UTC** — these are expensive to change once data exists,
+so they're fixed from the start.
+
+Time mapping is explicit, because PostgreSQL is strict about it. Every instant is a
+`DateTimeOffset` stored as `timestamp with time zone`, normalized to a zero-offset UTC value by a
+model-wide value conversion (`UtcTimestampConversion`) — Npgsql rejects a non-zero offset, and a
+client may legitimately send one. There are deliberately **no** local wall-clock `DateTime` columns:
+a series' wall clock is a `TimeOnly` plus its IANA zone id (`time without time zone` + `varchar`),
+and occurrence/series dates are `DateOnly` (`date`).
 
 ### Feature modules (vertical slices)
 
@@ -192,11 +231,11 @@ keeps related code together and the composition root readable.
 
 ### Orchestration & testing with Aspire
 
-.NET Aspire models the app topology (API + SQL Server) so a single command runs everything locally
+.NET Aspire models the app topology (API + PostgreSQL) so a single command runs everything locally
 with a dashboard. The same model powers integration tests: `Aspire.Hosting.Testing` boots the whole
-app against a **real** SQL Server container, so tests exercise persistence, scoping and the real auth
-pipeline end-to-end — not mocks. Unit tests stay Docker-free for a fast inner loop; integration tests
-gate deployment in CI.
+app against a **real** PostgreSQL container — the same engine production runs — so tests exercise
+persistence, scoping and the real auth pipeline end-to-end, not mocks. Unit tests stay Docker-free
+for a fast inner loop.
 
 ### Design principles
 

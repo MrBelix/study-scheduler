@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 namespace StudyScheduler.IntegrationTests;
 
 /// <summary>
-/// End-to-end scope tests over the real stack (SQL Server container + API + Telegram auth):
+/// End-to-end scope tests over the real stack (PostgreSQL container + API + Telegram auth):
 /// a tutor must never reach another tutor's students. Each test uses distinct tutor ids so the
 /// shared database stays isolated between tests.
 /// </summary>
