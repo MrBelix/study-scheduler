@@ -1,7 +1,7 @@
 # CI/CD: unit + integration tests gate the deploy; on green main the deploy job
-# calls Dokploy's deploy webhook (exposed via Traefik at /api/deploy), which
-# builds the Dockerfile on the server. Dokploy's own push-webhook autodeploy
-# must stay OFF, or pushes would deploy without waiting for tests.
+# calls Dokploy API (exposed at deploy.belix.dev via Traefik, /api path only),
+# which builds the Dockerfile on the server. Dokploy's GitHub-App autodeploy
+# can't reach the private panel, so this pipeline is the only deploy trigger.
 name: CI
 
 on:
@@ -24,7 +24,7 @@ jobs:
 
   integration:
     name: Integration tests (Aspire + PostgreSQL)
-    runs-on: ubuntu-latest # ubuntu runners ship a running Docker daemon that Aspire uses
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -38,5 +38,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Dokploy deploy
-        run: curl -fsS -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"
+      - name: Deploy Application
+        uses: thinesjs/dokploy-deployer-action@v1
+        with:
+          dokploy_url: ${{ secrets.DOKPLOY_URL }}
+          api_key: ${{ secrets.DOKPLOY_API_KEY }}
+          type: application
+          application_id: ${{ secrets.DOKPLOY_APPLICATION_ID }}
+          wait_for_deployment: true
+          deployment_timeout: 600
