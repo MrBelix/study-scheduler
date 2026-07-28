@@ -145,7 +145,7 @@ user-secrets). Environment variables use `__` for nested keys. **No secret is co
 | `TelegramAuth__MaxAuthAge` | no | `d.hh:mm:ss`, default `1.00:00:00` |
 | `Cors__AllowedOrigins__0` | **yes in production** | Mini App origin, e.g. `https://app.example.org`. Add `__1`, `__2`, … for more. Left empty in production, **no** cross-origin request is allowed |
 | `Notifications__WebhookUrl` | no | Public HTTPS URL Telegram POSTs updates to, e.g. `https://api.example.org/telegram/webhook`. Empty means poller-only mode, nothing registered with Telegram |
-| `Notifications__WebhookSecret` | with `WebhookUrl` | Shared secret echoed back in `X-Telegram-Bot-Api-Secret-Token`; the endpoint 404s without it |
+| `Notifications__WebhookSecret` | with `WebhookUrl` | Shared secret echoed back in `X-Telegram-Bot-Api-Secret-Token`; the endpoint 404s without it. Self-invented, not issued by Telegram — generate with `openssl rand -hex 32` (allowed: 1–256 chars of `A-Za-z0-9_-`) |
 | `Notifications__PollIntervalMinutes` | no | Default `1` |
 | `Notifications__FollowUpLookbackMinutes` | no | Default `60` |
 | `RateLimiting__Write__PermitLimit` | no | Default `60` |
