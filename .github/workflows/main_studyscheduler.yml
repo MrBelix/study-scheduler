@@ -1,5 +1,7 @@
-# CI: run unit + integration tests on pushes and PRs to main.
-# Deployment is handled by Dokploy (builds the Dockerfile on push to main) — no deploy job here.
+# CI/CD: unit + integration tests gate the deploy; on green main the deploy job
+# calls Dokploy's deploy webhook (exposed via Traefik at /api/deploy), which
+# builds the Dockerfile on the server. Dokploy's own push-webhook autodeploy
+# must stay OFF, or pushes would deploy without waiting for tests.
 name: CI
 
 on:
@@ -29,3 +31,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet test tests/StudyScheduler.IntegrationTests/StudyScheduler.IntegrationTests.csproj --configuration Release
+
+  deploy:
+    name: Deploy to Dokploy
+    needs: [unit, integration]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Dokploy deploy
+        run: curl -fsS -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"

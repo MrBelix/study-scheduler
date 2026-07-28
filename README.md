@@ -89,9 +89,9 @@ repo. To allow the frontend in production, set `Cors__AllowedOrigins__0` to its 
 
 ### Deploy
 
-Push to `main` — **Dokploy** builds `Dockerfile` from the repo root and restarts the container, while
-GitHub Actions runs the test suites. See [Deployment](#deployment) under Reference for the required
-environment variables.
+Push to `main` — GitHub Actions runs the test suites, and on green triggers **Dokploy**, which
+builds `Dockerfile` from the repo root and restarts the container. See [Deployment](#deployment)
+under Reference for the required environment variables.
 
 ---
 
@@ -156,14 +156,23 @@ user-secrets). Environment variables use `__` for nested keys. **No secret is co
 
 ### Deployment
 
-Production is **self-hosted via [Dokploy](https://dokploy.com/)**. On push to `main` Dokploy builds
-`Dockerfile` (build context = this repo root) and restarts the container:
+Production is **self-hosted via [Dokploy](https://dokploy.com/)**. On push to `main` GitHub Actions
+runs the test suites; only when both pass does the `deploy` job call the Dokploy API
+(`application.deploy`), and Dokploy builds `Dockerfile` (build context = this repo root) and
+restarts the container:
 
 ```
-push to main ─► Dokploy: docker build -f Dockerfile . ─► container (plain HTTP :8080)
-                                                          │
-GitHub Actions: unit + integration tests (parallel)       └─► Traefik terminates TLS
+push to main ─► GitHub Actions: unit + integration tests
+                     └─► deploy job (self-hosted runner) ─► Dokploy API: application.deploy
+                                                                 └─► docker build -f Dockerfile .
+                                                                          └─► container (plain HTTP :8080)
+                                                                                   └─► Traefik terminates TLS
 ```
+
+Dokploy's own push-webhook autodeploy must stay **off** for this app — otherwise pushes would
+deploy without waiting for tests. The deploy job runs on a self-hosted runner on the same server
+(it calls `http://localhost:3000`) and needs two repo secrets: `DOKPLOY_TOKEN` (API key) and
+`DOKPLOY_APP_ID` (the application id in Dokploy).
 
 - The container serves **plain HTTP on 8080** (`ASPNETCORE_URLS` is baked into the image, `EXPOSE
   8080` is declared). Traefik in front of it terminates TLS — do **not** add a certificate to the
@@ -186,7 +195,8 @@ GitHub Actions: unit + integration tests (parallel)       └─► Traefik term
 #### CI
 
 `.github/workflows/main_studyscheduler.yml` runs the unit and integration suites on every push and
-PR to `main`. It does **not** deploy — Dokploy owns that.
+PR to `main`; on a green push to `main` its `deploy` job triggers the Dokploy build (see
+[Deployment](#deployment)).
 
 ---
 
