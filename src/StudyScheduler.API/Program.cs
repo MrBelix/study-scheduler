@@ -8,6 +8,7 @@ using StudyScheduler.API.Core.RateLimiting;
 using StudyScheduler.API.Features.Lessons;
 using StudyScheduler.API.Features.Notifications;
 using StudyScheduler.API.Features.Profile;
+using StudyScheduler.API.Features.Reports;
 using StudyScheduler.API.Features.Students;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -28,6 +29,7 @@ builder.Services.AddMiniAppCors(builder.Configuration, builder.Environment);
 builder.Services.AddStudentsFeature();
 builder.Services.AddProfileFeature();
 builder.Services.AddLessonsFeature();
+builder.Services.AddReportsFeature();
 builder.Services.AddNotificationsFeature();
 
 var app = builder.Build();
@@ -45,6 +47,7 @@ app.UseRateLimiter();
 app.MapStudentsFeature();
 app.MapProfileFeature();
 app.MapLessonsFeature();
+app.MapReportsFeature();
 app.MapNotificationsFeature();
 app.MapDefaultEndpoints();
 

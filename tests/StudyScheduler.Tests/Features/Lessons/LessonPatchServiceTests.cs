@@ -170,4 +170,55 @@ public class LessonPatchServiceTests
         var ok = Assert.IsType<LessonPatchOutcome.Ok>(outcome);
         Assert.False(ok.Lesson.IsPaid);
     }
+
+    [Fact]
+    public async Task ApplyAsync_CancelAndMarkPaid_ReturnsValidationOnIsPaid()
+    {
+        // Arrange
+        var lesson = AddLesson(day: 20, hour: 15);
+
+        // Act — SetPaid sees the post-patch status, so this is rejected, not silently applied.
+        var outcome = await _sut.ApplyAsync(
+            lesson, Patch(status: LessonStatus.Cancelled, isPaid: true), Tutor, isNew: false);
+
+        // Assert
+        var validation = Assert.IsType<LessonPatchOutcome.Validation>(outcome);
+        var error = Assert.Single(validation.Failure.Errors);
+        Assert.Equal("Lesson.CancelledCannotBePaid", error.Code);
+        Assert.Equal("IsPaid", error.Field);
+        Assert.Equal(0, _uow.SaveCount);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_CancelPaidLesson_ClearsPaidFlagAndSaves()
+    {
+        // Arrange — the student had already paid for this lesson.
+        var lesson = AddLesson(day: 20, hour: 15);
+        lesson.SetPaid(true);
+
+        // Act
+        var outcome = await _sut.ApplyAsync(lesson, Patch(status: LessonStatus.Cancelled), Tutor, isNew: false);
+
+        // Assert
+        var ok = Assert.IsType<LessonPatchOutcome.Ok>(outcome);
+        Assert.Equal(LessonStatus.Cancelled, ok.Lesson.Status);
+        Assert.False(ok.Lesson.IsPaid);
+        Assert.Equal(1, _uow.SaveCount);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_UnCancelAndMarkPaid_Succeeds()
+    {
+        // Arrange
+        var lesson = AddLesson(day: 20, hour: 15, status: LessonStatus.Cancelled);
+
+        // Act — the status is applied before the paid flag, so the guard no longer bites.
+        var outcome = await _sut.ApplyAsync(
+            lesson, Patch(status: LessonStatus.Scheduled, isPaid: true), Tutor, isNew: false);
+
+        // Assert
+        var ok = Assert.IsType<LessonPatchOutcome.Ok>(outcome);
+        Assert.Equal(LessonStatus.Scheduled, ok.Lesson.Status);
+        Assert.True(ok.Lesson.IsPaid);
+    }
 }

@@ -164,6 +164,9 @@ public sealed class Lesson : Entity
                 "Lesson.UnknownStatus", $"Unknown lesson status '{status}'.", "Status"));
 
         Status = status;
+        // A cancelled lesson owes and is owed nothing: the payment flag is dropped, never restored.
+        if (status == LessonStatus.Cancelled)
+            IsPaid = false;
         return Result.Success();
     }
 
@@ -178,12 +181,22 @@ public sealed class Lesson : Entity
             return Result.Failure(error);
 
         Price = price;
-        if (price == 0m)
+        // Cancelled lessons stay unpaid — free or not (see ChangeStatus).
+        if (price == 0m && Status != LessonStatus.Cancelled)
             IsPaid = true;
         return Result.Success();
     }
 
-    public void SetPaid(bool isPaid) => IsPaid = isPaid;
+    /// <summary>Sets the payment flag. A cancelled lesson can never be paid.</summary>
+    public Result SetPaid(bool isPaid)
+    {
+        if (isPaid && Status == LessonStatus.Cancelled)
+            return Result.Failure(new Error(
+                "Lesson.CancelledCannotBePaid", "A cancelled lesson cannot be marked as paid.", "IsPaid"));
+
+        IsPaid = isPaid;
+        return Result.Success();
+    }
 
     public Result UpdateTopic(string? topic)
     {

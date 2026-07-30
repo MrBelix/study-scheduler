@@ -115,15 +115,65 @@ public class LessonTests
     }
 
     [Fact]
+    public void SetPrice_ToZeroOnCancelledLesson_LeavesLessonUnpaid()
+    {
+        // Arrange — a cancelled lesson, whatever it used to cost.
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+        lesson.ChangeStatus(LessonStatus.Cancelled);
+
+        // Act — dropping the price to zero would normally settle the lesson.
+        var result = lesson.SetPrice(0m);
+
+        // Assert — but a cancelled lesson can never be paid.
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0m, lesson.Price);
+        Assert.False(lesson.IsPaid);
+    }
+
+    [Fact]
     public void SetPaid_AfterZeroPrice_HonoursExplicitFlag()
     {
         // Arrange — free lessons start paid…
         var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 0m, CreatedAt).Value;
 
         // Act — …but the tutor can still mark one as unpaid explicitly.
-        lesson.SetPaid(false);
+        var result = lesson.SetPaid(false);
 
         // Assert
+        Assert.True(result.IsSuccess);
+        Assert.False(lesson.IsPaid);
+    }
+
+    [Fact]
+    public void SetPaid_TrueOnCancelledLesson_Fails()
+    {
+        // Arrange
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+        lesson.ChangeStatus(LessonStatus.Cancelled);
+
+        // Act
+        var result = lesson.SetPaid(true);
+
+        // Assert
+        Assert.False(result.IsSuccess);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("Lesson.CancelledCannotBePaid", error.Code);
+        Assert.Equal("IsPaid", error.Field);
+        Assert.False(lesson.IsPaid);
+    }
+
+    [Fact]
+    public void SetPaid_FalseOnCancelledLesson_Succeeds()
+    {
+        // Arrange — cancelling already cleared the flag; clearing it again is idempotent.
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+        lesson.ChangeStatus(LessonStatus.Cancelled);
+
+        // Act
+        var result = lesson.SetPaid(false);
+
+        // Assert
+        Assert.True(result.IsSuccess);
         Assert.False(lesson.IsPaid);
     }
 
@@ -173,6 +223,39 @@ public class LessonTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Lesson.UnknownStatus", Assert.Single(result.Errors).Code);
+    }
+
+    [Fact]
+    public void ChangeStatus_ToCancelledOnPaidLesson_ClearsPaidFlag()
+    {
+        // Arrange — the common flow: cancelling a lesson the student had already paid for.
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+        lesson.SetPaid(true);
+
+        // Act
+        var result = lesson.ChangeStatus(LessonStatus.Cancelled);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.Equal(LessonStatus.Cancelled, lesson.Status);
+        Assert.False(lesson.IsPaid);
+    }
+
+    [Fact]
+    public void ChangeStatus_UnCancelling_DoesNotRestorePaidFlag()
+    {
+        // Arrange — paid, then cancelled (which dropped the flag).
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+        lesson.SetPaid(true);
+        lesson.ChangeStatus(LessonStatus.Cancelled);
+
+        // Act — the lesson is put back on the schedule.
+        var result = lesson.ChangeStatus(LessonStatus.Scheduled);
+
+        // Assert — the payment is not resurrected; the tutor re-states it explicitly.
+        Assert.True(result.IsSuccess);
+        Assert.Equal(LessonStatus.Scheduled, lesson.Status);
+        Assert.False(lesson.IsPaid);
     }
 
     [Fact]

@@ -75,7 +75,7 @@ public sealed class LessonPatchService(
         if (request.Price is { } price)
             errors.AddRange(lesson.SetPrice(price).Errors);
         if (request.IsPaid is { } isPaid)
-            lesson.SetPaid(isPaid);
+            errors.AddRange(lesson.SetPaid(isPaid).Errors);
         if (request.Topic is not null)
             errors.AddRange(lesson.UpdateTopic(request.Topic).Errors);
         if (request.Description is not null)
