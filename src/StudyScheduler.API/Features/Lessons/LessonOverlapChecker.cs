@@ -1,5 +1,6 @@
 using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.Domain.Lessons;
+using StudyScheduler.Domain.Students;
 
 namespace StudyScheduler.API.Features.Lessons;
 
@@ -8,6 +9,9 @@ namespace StudyScheduler.API.Features.Lessons;
 /// lessons via SQL and active series analytically (computing their occurrences), so slots of
 /// open-ended series are protected even before they are materialized.
 ///
+/// Archived students are invisible here: their lessons and series still appear on the schedule,
+/// but they never block a new booking — the tutor stopped teaching them, so the slot is free.
+///
 /// The check-then-insert flow can race (no range-exclusion constraint backs it), but the tenant is
 /// a single human tutor — the realistic race is a double-click — so this is accepted.
 /// </summary>
@@ -15,6 +19,7 @@ public sealed class LessonOverlapChecker(
     ILessonRepository lessons,
     ILessonSeriesRepository seriesRepo,
     SeriesExpansion seriesExpansion,
+    IStudentRepository students,
     ILogger<LessonOverlapChecker> logger)
 {
     /// <summary>
@@ -38,15 +43,22 @@ public sealed class LessonOverlapChecker(
         CancellationToken ct = default)
     {
         var conflicts = new List<LessonConflict>();
+        var archivedStudents = await GetArchivedStudentIdsAsync(tutorTelegramId, ct);
 
         foreach (var lesson in await lessons.GetOverlappingAsync(tutorTelegramId, startUtc, endUtc, excludeLessonId, ct))
-            conflicts.Add(FromLesson(lesson));
+        {
+            if (!archivedStudents.Contains(lesson.StudentId))
+                conflicts.Add(FromLesson(lesson));
+        }
 
         // Unmaterialized occurrences of active series. A materialized occurrence is governed by its
         // concrete lesson (already checked above) — SeriesExpansion suppresses those.
         foreach (var (series, occurrences) in
             await seriesExpansion.GetFreeOccurrencesAsync(tutorTelegramId, startUtc, endUtc, ct: ct))
         {
+            if (archivedStudents.Contains(series.StudentId))
+                continue;
+
             conflicts.AddRange(occurrences
                 .Where(o => excludeOccurrence is not { } excl
                     || excl.SeriesId != series.Id
@@ -66,12 +78,15 @@ public sealed class LessonOverlapChecker(
     public async Task<IReadOnlyList<LessonConflict>> CheckSeriesAsync(LessonSeries candidate, CancellationToken ct = default)
     {
         var conflicts = new List<LessonConflict>();
+        var archivedStudents = await GetArchivedStudentIdsAsync(candidate.TutorTelegramId, ct);
 
         // Existing lessons are finite, so this check has no horizon: compute the candidate's
         // occurrences across the span of the tutor's future lessons and compare in memory.
         var seriesStartUtc = new DateTimeOffset(
             candidate.StartDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).AddDays(-2);
-        var futureLessons = await lessons.GetFromDateAsync(candidate.TutorTelegramId, seriesStartUtc, ct);
+        var futureLessons = (await lessons.GetFromDateAsync(candidate.TutorTelegramId, seriesStartUtc, ct))
+            .Where(l => !archivedStudents.Contains(l.StudentId))
+            .ToList();
         if (futureLessons.Count > 0)
         {
             var minLocal = DateOnly.FromDateTime(futureLessons.Min(l => l.StartUtc).UtcDateTime).AddDays(-2);
@@ -86,7 +101,7 @@ public sealed class LessonOverlapChecker(
         // A series ended before the candidate starts can't collide — skip it in the query.
         foreach (var other in await seriesRepo.GetActiveByTutorAsync(candidate.TutorTelegramId, candidate.StartDate, ct))
         {
-            if (other.Id == candidate.Id)
+            if (other.Id == candidate.Id || archivedStudents.Contains(other.StudentId))
                 continue;
 
             if (FirstCollision(candidate, other) is { } collision)
@@ -100,6 +115,16 @@ public sealed class LessonOverlapChecker(
 
         return conflicts;
     }
+
+    /// <summary>
+    /// Ids of the tutor's archived students — the owners whose lessons and series are skipped by
+    /// conflict detection. Read-only use; the schedule itself is unaffected.
+    /// </summary>
+    private async Task<HashSet<Guid>> GetArchivedStudentIdsAsync(long tutorTelegramId, CancellationToken ct) =>
+        (await students.GetAllByTutorIdAsync(tutorTelegramId, ct))
+            .Where(s => s.Status == StudentStatus.Archived)
+            .Select(s => s.Id)
+            .ToHashSet();
 
     /// <summary>
     /// First occurrence of <paramref name="other"/> that collides with <paramref name="candidate"/>,

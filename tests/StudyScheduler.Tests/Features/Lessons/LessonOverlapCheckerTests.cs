@@ -2,7 +2,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.API.Features.Lessons;
 using StudyScheduler.Domain.Lessons;
+using StudyScheduler.Domain.Students;
 using Xunit;
+// The Student constant below shadows the domain type's simple name.
+using DomainStudent = StudyScheduler.Domain.Students.Student;
 
 namespace StudyScheduler.Tests.Features.Lessons;
 
@@ -15,17 +18,20 @@ public class LessonOverlapCheckerTests
 
     private readonly FakeLessonRepository _lessons = new();
     private readonly FakeLessonSeriesRepository _series = new();
+    private readonly FakeStudentRepository _students = new();
     private readonly LessonOverlapChecker _sut;
 
     public LessonOverlapCheckerTests() =>
         _sut = new LessonOverlapChecker(
-            _lessons, _series, new SeriesExpansion(_lessons, _series), NullLogger<LessonOverlapChecker>.Instance);
+            _lessons, _series, new SeriesExpansion(_lessons, _series), _students,
+            NullLogger<LessonOverlapChecker>.Instance);
 
     private static DateTimeOffset Utc(int day, int hour) => new(2026, 7, day, hour, 0, 0, TimeSpan.Zero);
 
-    private Lesson AddLesson(int day, int startHour, int duration = 60, LessonStatus status = LessonStatus.Scheduled)
+    private Lesson AddLesson(
+        int day, int startHour, int duration = 60, LessonStatus status = LessonStatus.Scheduled, Guid? studentId = null)
     {
-        var lesson = Lesson.Create(Tutor, Student, Utc(day, startHour), duration, 0m, CreatedAt).Value;
+        var lesson = Lesson.Create(Tutor, studentId ?? Student, Utc(day, startHour), duration, 0m, CreatedAt).Value;
         if (status != LessonStatus.Scheduled)
             lesson.ChangeStatus(status);
         _lessons.Items.Add(lesson);
@@ -33,15 +39,24 @@ public class LessonOverlapCheckerTests
     }
 
     // Mon/Thu 16:00 London == 15:00 UTC in July.
-    private LessonSeries MondayThursdaySeries(bool addToRepo = true)
+    private LessonSeries MondayThursdaySeries(bool addToRepo = true, Guid? studentId = null)
     {
         var series = LessonSeries.Create(
-            Tutor, Student,
+            Tutor, studentId ?? Student,
             WeeklyPattern.Create(Weekdays.Monday | Weekdays.Thursday, new TimeOnly(16, 0), 60, London).Value,
             new DateOnly(2026, 7, 6), CreatedAt).Value;
         if (addToRepo)
             _series.Items.Add(series);
         return series;
+    }
+
+    /// <summary>Registers a student of the tutor with the given status and returns its id.</summary>
+    private Guid AddStudent(StudentStatus status)
+    {
+        var student = DomainStudent.Create(Tutor, "S", 100m, CreatedAt).Value;
+        student.ChangeStatus(status);
+        _students.Items.Add(student);
+        return student.Id;
     }
 
     [Fact]
@@ -94,6 +109,48 @@ public class LessonOverlapCheckerTests
     }
 
     [Fact]
+    public async Task CheckLesson_OverlapsActiveStudentLesson_ReturnsConflict()
+    {
+        // Arrange
+        var active = AddStudent(StudentStatus.Active);
+        var lesson = AddLesson(day: 20, startHour: 15, studentId: active);
+
+        // Act
+        var conflicts = await _sut.CheckLessonAsync(Tutor, Utc(20, 15), Utc(20, 16));
+
+        // Assert
+        Assert.Equal(lesson.Id, Assert.Single(conflicts).LessonId);
+    }
+
+    [Fact]
+    public async Task CheckLesson_OverlapsArchivedStudentLesson_NoConflict()
+    {
+        // Arrange
+        var archived = AddStudent(StudentStatus.Archived);
+        AddLesson(day: 20, startHour: 15, studentId: archived);
+
+        // Act
+        var conflicts = await _sut.CheckLessonAsync(Tutor, Utc(20, 15), Utc(20, 16));
+
+        // Assert
+        Assert.Empty(conflicts);
+    }
+
+    [Fact]
+    public async Task CheckLesson_OverlapsArchivedStudentSeriesOccurrence_NoConflict()
+    {
+        // Arrange
+        var archived = AddStudent(StudentStatus.Archived);
+        MondayThursdaySeries(studentId: archived);
+
+        // Act — Monday 2026-07-06 slot is 15:00–16:00 UTC.
+        var conflicts = await _sut.CheckLessonAsync(Tutor, Utc(6, 15), Utc(6, 16));
+
+        // Assert
+        Assert.Empty(conflicts);
+    }
+
+    [Fact]
     public async Task CheckSeries_CollidesWithExistingLesson_ReturnsConflict()
     {
         var lesson = AddLesson(day: 6, startHour: 15); // Monday 15:00–16:00 UTC
@@ -126,5 +183,35 @@ public class LessonOverlapCheckerTests
         var candidate = MondayThursdaySeries(addToRepo: false);
 
         Assert.Empty(await _sut.CheckSeriesAsync(candidate));
+    }
+
+    [Fact]
+    public async Task CheckSeries_CollidesWithArchivedStudentLesson_NoConflict()
+    {
+        // Arrange
+        var archived = AddStudent(StudentStatus.Archived);
+        AddLesson(day: 6, startHour: 15, studentId: archived); // Monday 15:00–16:00 UTC
+        var candidate = MondayThursdaySeries(addToRepo: false);
+
+        // Act
+        var conflicts = await _sut.CheckSeriesAsync(candidate);
+
+        // Assert
+        Assert.Empty(conflicts);
+    }
+
+    [Fact]
+    public async Task CheckSeries_CollidesWithArchivedStudentSeries_NoConflict()
+    {
+        // Arrange
+        var archived = AddStudent(StudentStatus.Archived);
+        MondayThursdaySeries(studentId: archived);             // in repo, same pattern
+        var candidate = MondayThursdaySeries(addToRepo: false);
+
+        // Act
+        var conflicts = await _sut.CheckSeriesAsync(candidate);
+
+        // Assert
+        Assert.Empty(conflicts);
     }
 }

@@ -53,7 +53,8 @@ public sealed record ScheduleEntry(
         (int)(occurrence.EndUtc - occurrence.StartUtc).TotalMinutes,
         LessonStatus.Scheduled,
         price,
-        IsPaid: false,
+        // Mirrors Lesson.Create: a free slot owes nothing, so it reads as settled even while virtual.
+        IsPaid: price == 0m,
         Topic: null,
         Description: null,
         IsVirtual: true,

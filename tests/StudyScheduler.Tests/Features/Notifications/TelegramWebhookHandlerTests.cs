@@ -35,7 +35,8 @@ public class TelegramWebhookHandlerTests
     public TelegramWebhookHandlerTests()
     {
         var overlap = new LessonOverlapChecker(
-            _lessons, _series, new SeriesExpansion(_lessons, _series), NullLogger<LessonOverlapChecker>.Instance);
+            _lessons, _series, new SeriesExpansion(_lessons, _series), new FakeStudentRepository(),
+            NullLogger<LessonOverlapChecker>.Instance);
         var patch = new LessonPatchService(_lessons, overlap, _uow, NullLogger<LessonPatchService>.Instance);
         _sut = new TelegramWebhookHandler(
             _lessons, patch, _profiles, _uow, _sender, new NotificationText(),

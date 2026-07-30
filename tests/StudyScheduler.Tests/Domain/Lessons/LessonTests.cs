@@ -60,6 +60,74 @@ public class LessonTests
     }
 
     [Fact]
+    public void Create_ZeroPrice_MarksLessonPaid()
+    {
+        // Act — a free lesson owes nothing, so it must not show up as a debt.
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 0m, CreatedAt).Value;
+
+        // Assert
+        Assert.Equal(0m, lesson.Price);
+        Assert.True(lesson.IsPaid);
+    }
+
+    [Fact]
+    public void SetPrice_ToZero_MarksLessonPaid()
+    {
+        // Arrange
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+
+        // Act
+        var result = lesson.SetPrice(0m);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.True(lesson.IsPaid);
+    }
+
+    [Fact]
+    public void SetPrice_FromZeroToPositive_KeepsPaidFlag()
+    {
+        // Arrange — created free, hence paid.
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 0m, CreatedAt).Value;
+
+        // Act — a non-zero price never forces the flag either way.
+        var result = lesson.SetPrice(300m);
+
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.Equal(300m, lesson.Price);
+        Assert.True(lesson.IsPaid);
+    }
+
+    [Fact]
+    public void SetPrice_Negative_Fails()
+    {
+        // Arrange
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
+
+        // Act
+        var result = lesson.SetPrice(-1m);
+
+        // Assert
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Lesson.NegativePrice", Assert.Single(result.Errors).Code);
+        Assert.Equal(300m, lesson.Price);
+    }
+
+    [Fact]
+    public void SetPaid_AfterZeroPrice_HonoursExplicitFlag()
+    {
+        // Arrange — free lessons start paid…
+        var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 0m, CreatedAt).Value;
+
+        // Act — …but the tutor can still mark one as unpaid explicitly.
+        lesson.SetPaid(false);
+
+        // Assert
+        Assert.False(lesson.IsPaid);
+    }
+
+    [Fact]
     public void Reschedule_MovesStartKeepsDurationAndRecomputesEnd()
     {
         var lesson = Lesson.Create(555, Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;

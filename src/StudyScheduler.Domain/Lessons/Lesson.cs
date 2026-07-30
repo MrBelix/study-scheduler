@@ -47,7 +47,8 @@ public sealed class Lesson : Entity
         SeriesId = seriesId;
         OccurrenceDate = occurrenceDate;
         Status = LessonStatus.Scheduled;
-        IsPaid = false;
+        // A free lesson owes nothing, so it starts settled instead of showing up as a debt.
+        IsPaid = price == 0m;
     }
 
     /// <summary>Telegram id of the tutor this lesson belongs to. Ownership / scope key.</summary>
@@ -166,12 +167,19 @@ public sealed class Lesson : Entity
         return Result.Success();
     }
 
+    /// <summary>
+    /// Replaces the price snapshot. Dropping it to zero settles the lesson (nothing is owed);
+    /// a non-zero price leaves <see cref="IsPaid"/> exactly as it was. Callers that also apply an
+    /// explicit paid flag must do so after this call, so the user's choice wins.
+    /// </summary>
     public Result SetPrice(decimal price)
     {
         if (ValidatePrice(price) is { } error)
             return Result.Failure(error);
 
         Price = price;
+        if (price == 0m)
+            IsPaid = true;
         return Result.Success();
     }
 

@@ -15,13 +15,15 @@ public class LessonPatchServiceTests
 
     private readonly FakeLessonRepository _lessons = new();
     private readonly FakeLessonSeriesRepository _series = new();
+    private readonly FakeStudentRepository _students = new();
     private readonly FakeUnitOfWork _uow = new();
     private readonly LessonPatchService _sut;
 
     public LessonPatchServiceTests()
     {
         var overlap = new LessonOverlapChecker(
-            _lessons, _series, new SeriesExpansion(_lessons, _series), NullLogger<LessonOverlapChecker>.Instance);
+            _lessons, _series, new SeriesExpansion(_lessons, _series), _students,
+            NullLogger<LessonOverlapChecker>.Instance);
         _sut = new LessonPatchService(_lessons, overlap, _uow, NullLogger<LessonPatchService>.Instance);
     }
 
@@ -138,5 +140,34 @@ public class LessonPatchServiceTests
             materialized, Patch(startUtc: occurrence.StartUtc.AddMinutes(30)), Tutor, isNew: true);
 
         Assert.IsType<LessonPatchOutcome.Conflict>(outcome);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_PriceChangedToZero_MarksLessonPaid()
+    {
+        // Arrange
+        var lesson = AddLesson(day: 20, hour: 15); // price 100, unpaid
+
+        // Act
+        var outcome = await _sut.ApplyAsync(lesson, Patch(price: 0m), Tutor, isNew: false);
+
+        // Assert
+        var ok = Assert.IsType<LessonPatchOutcome.Ok>(outcome);
+        Assert.Equal(0m, ok.Lesson.Price);
+        Assert.True(ok.Lesson.IsPaid);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_PriceZeroWithExplicitUnpaid_KeepsLessonUnpaid()
+    {
+        // Arrange
+        var lesson = AddLesson(day: 20, hour: 15);
+
+        // Act
+        var outcome = await _sut.ApplyAsync(lesson, Patch(price: 0m, isPaid: false), Tutor, isNew: false);
+
+        // Assert
+        var ok = Assert.IsType<LessonPatchOutcome.Ok>(outcome);
+        Assert.False(ok.Lesson.IsPaid);
     }
 }
