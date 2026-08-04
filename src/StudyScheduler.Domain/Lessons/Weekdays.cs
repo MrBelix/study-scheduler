@@ -18,15 +18,3 @@ public enum Weekdays
     Saturday = 1 << (int)DayOfWeek.Saturday,
     All = Sunday | Monday | Tuesday | Wednesday | Thursday | Friday | Saturday,
 }
-
-public static class WeekdaysExtensions
-{
-    public static Weekdays ToWeekdays(this DayOfWeek day) => (Weekdays)(1 << (int)day);
-
-    public static bool Contains(this Weekdays weekdays, DayOfWeek day) =>
-        (weekdays & day.ToWeekdays()) != 0;
-
-    /// <summary>At least one day and no bits outside <see cref="Weekdays.All"/>.</summary>
-    public static bool IsValidSet(this Weekdays weekdays) =>
-        weekdays != Weekdays.None && (weekdays & ~Weekdays.All) == 0;
-}

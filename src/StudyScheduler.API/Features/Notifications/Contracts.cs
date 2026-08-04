@@ -1,4 +1,4 @@
-using StudyScheduler.API.Core.Scheduling;
+using StudyScheduler.Domain.Lessons;
 
 namespace StudyScheduler.API.Features.Notifications;
 
@@ -9,8 +9,8 @@ public enum NotificationKind
     FollowUp,
 }
 
-/// <summary>A notification the planner decided is due for a specific schedule entry this tick.</summary>
-public sealed record DueNotification(NotificationKind Kind, ScheduleEntry Entry);
+/// <summary>A notification the planner decided is due for a specific lesson this tick.</summary>
+public sealed record DueNotification(NotificationKind Kind, Lesson Lesson);
 
 /// <summary>
 /// The outcome of a single Telegram send, classified for the runner's persistence decision.

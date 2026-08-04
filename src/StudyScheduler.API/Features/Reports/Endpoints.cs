@@ -1,40 +1,54 @@
-using System.Security.Claims;
+using System.Globalization;
 using Microsoft.AspNetCore.Http.HttpResults;
-using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.API.Core.ErrorHandling;
 
 namespace StudyScheduler.API.Features.Reports;
 
-/// <summary>HTTP handlers for the Reports feature. Wired to routes in <see cref="ReportsModule"/>.</summary>
+/// <summary>
+/// HTTP handlers for the Reports feature. Wired to routes in <see cref="ReportsModule"/>.
+/// "The current tutor" is the scope's tenant: every figure below is read through it.
+/// </summary>
 internal static class Endpoints
 {
-    private const int MaxRangeDays = 366;
+    private const string AnchorFormat = "yyyy-MM-dd";
 
     /// <summary>
-    /// Returns the current tutor's accounting summary over <c>[from, to)</c> — counts per status
-    /// plus planned / actual / outstanding income. Reads never write.
+    /// Returns everything the Money screen shows for one reporting window: income (received,
+    /// expected, and received over the same window one period earlier), the all-time debt ledger,
+    /// lesson counts, weekly load, chart buckets and per-student income.
+    /// <c>anchor</c> is any date inside the wanted window — omitted, it is today in the tutor's own
+    /// time zone, which is also where the window boundaries are resolved. Reads never write.
     /// </summary>
-    public static async Task<Results<Ok<ReportSummaryResponse>, ValidationProblem>> GetSummary(
-        DateTimeOffset from,
-        DateTimeOffset to,
-        ClaimsPrincipal principal,
-        ReportSummaryCalculator calculator,
+    public static async Task<Results<Ok<DashboardResponse>, ValidationProblem>> GetDashboard(
+        string? period,
+        string? anchor,
+        ReportDashboardService service,
         CancellationToken ct)
     {
-        if (ValidateRange(from, to) is { } errors)
-            return TypedResults.ValidationProblem(errors);
+        // Both parameters stay strings so an unknown value yields a clean ValidationProblem rather
+        // than a JSON/route-binding 400 with no field to attach to.
+        if (DashboardPeriod.ParseKind(period) is not { } kind)
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["Period"] = ["'period' must be one of: week, month, quarter."],
+            });
 
-        var summary = await calculator.CalculateAsync(principal.GetTelegramId(), from, to, ct);
-        return TypedResults.Ok(summary);
-    }
+        DateOnly? anchorDate = null;
+        if (!string.IsNullOrWhiteSpace(anchor))
+        {
+            if (!DateOnly.TryParseExact(
+                    anchor, AnchorFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["Anchor"] = [$"'anchor' must be a date in {AnchorFormat} format."],
+                });
 
-    private static Dictionary<string, string[]>? ValidateRange(DateTimeOffset from, DateTimeOffset to)
-    {
-        var errors = new Dictionary<string, string[]>();
-        if (to <= from)
-            errors["To"] = ["'to' must be after 'from'."];
-        else if ((to - from).TotalDays > MaxRangeDays)
-            errors["To"] = [$"Range must not exceed {MaxRangeDays} days."];
+            anchorDate = parsed;
+        }
 
-        return errors.Count == 0 ? null : errors;
+        var dashboard = await service.GetAsync(kind, anchorDate, ct);
+        return dashboard.IsSuccess
+            ? TypedResults.Ok(dashboard.Value)
+            : dashboard.ToValidationProblem();
     }
 }

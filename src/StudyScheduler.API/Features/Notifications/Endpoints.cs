@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
@@ -25,7 +27,7 @@ internal static class Endpoints
         if (string.IsNullOrEmpty(secret))
             return Results.NotFound(); // webhook disabled
 
-        if (http.Request.Headers[SecretHeader].ToString() != secret)
+        if (!SecretMatches(http.Request.Headers[SecretHeader].ToString(), secret))
             return Results.NotFound(); // wrong/absent secret — don't leak existence
 
         Telegram.Bot.Types.Update? update;
@@ -46,4 +48,17 @@ internal static class Endpoints
         await handler.HandleAsync(update, ct);
         return Results.Ok();
     }
+
+    /// <summary>
+    /// Compares the presented secret to the configured one without leaking WHERE they diverge: this
+    /// gate is the whole authorization of the webhook — everything past it acts as the tenant the
+    /// payload names — so an ordinary <c>!=</c>, which stops at the first differing character, would
+    /// hand an attacker a timing oracle to guess the secret byte by byte.
+    /// <see cref="CryptographicOperations.FixedTimeEquals"/> takes the same time for every equal-length
+    /// candidate and simply returns false on a length mismatch (a length is not worth protecting).
+    /// The same primitive guards the init-data signature in <c>TelegramInitDataValidator</c>.
+    /// </summary>
+    private static bool SecretMatches(string presented, string secret) =>
+        CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(presented), Encoding.UTF8.GetBytes(secret));
 }

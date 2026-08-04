@@ -1,4 +1,3 @@
-using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.API.Features.Reports;
 using StudyScheduler.Domain.Lessons;
 using Xunit;
@@ -6,8 +5,8 @@ using Xunit;
 namespace StudyScheduler.Tests.Features.Reports;
 
 /// <summary>
-/// Drives the pure aggregation seam directly — <see cref="ScheduleReader"/> is sealed and needs a
-/// database, so the arithmetic is exercised on hand-built <see cref="ScheduleEntry"/> lists.
+/// Drives the pure aggregation seam directly — the calculator's own query needs a database, so the
+/// arithmetic is exercised on hand-built <see cref="Lesson"/> lists.
 /// </summary>
 public class ReportSummaryCalculatorTests
 {
@@ -15,55 +14,47 @@ public class ReportSummaryCalculatorTests
     private static readonly DateTimeOffset CreatedAt = new(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Now = new(2026, 7, 20, 12, 0, 0, TimeSpan.Zero);
 
-    private static ScheduleEntry Entry(
+    private static Lesson Entry(
         DateTimeOffset startUtc,
         LessonStatus status = LessonStatus.Scheduled,
         decimal price = 100m,
         bool isPaid = false,
-        bool isVirtual = false) =>
-        new(
-            isVirtual ? null : Guid.NewGuid(),
-            Student,
-            isVirtual ? Guid.NewGuid() : null,
-            isVirtual ? DateOnly.FromDateTime(startUtc.UtcDateTime) : null,
-            startUtc,
-            startUtc.AddMinutes(60),
-            60,
-            status,
-            price,
-            isPaid,
-            Topic: null,
-            Description: null,
-            IsVirtual: isVirtual,
-            CreatedAtUtc: CreatedAt,
-            Notifications: NotificationState.None);
+        Guid? seriesId = null)
+    {
+        var lesson = Lesson.Create(
+            Student, startUtc, 60, price, CreatedAt,
+            seriesId: seriesId,
+            occurrenceDate: seriesId is null ? null : DateOnly.FromDateTime(startUtc.UtcDateTime)).Value;
+        if (status != LessonStatus.Scheduled)
+            lesson.ChangeStatus(status);
+        // After the status: cancelling clears the payment flag, so the order is not interchangeable.
+        lesson.SetPaid(isPaid);
+        return lesson;
+    }
 
     [Fact]
     public void Summarize_EmptySchedule_ReturnsZeros()
     {
         // Arrange
-        IReadOnlyList<ScheduleEntry> entries = [];
+        IReadOnlyList<Lesson> schedule = [];
 
         // Act
-        var summary = ReportSummaryCalculator.Summarize(entries, Now);
+        var summary = ReportSummaryCalculator.Summarize(schedule, Now);
 
         // Assert
-        Assert.Equal(0, summary.TotalCount);
         Assert.Equal(0, summary.CompletedCount);
         Assert.Equal(0, summary.CancelledCount);
         Assert.Equal(0, summary.UpcomingCount);
         Assert.Equal(0, summary.UnclosedCount);
-        Assert.Equal(0, summary.PaidCount);
         Assert.Equal(0m, summary.PlannedIncome);
         Assert.Equal(0m, summary.ActualIncome);
-        Assert.Equal(0m, summary.OutstandingIncome);
     }
 
     [Fact]
     public void Summarize_MixedStatuses_CountsEachBucket()
     {
         // Arrange
-        IReadOnlyList<ScheduleEntry> entries =
+        IReadOnlyList<Lesson> schedule =
         [
             Entry(Now.AddDays(-2), LessonStatus.Completed, isPaid: true),
             Entry(Now.AddDays(-1), LessonStatus.Cancelled),
@@ -73,25 +64,23 @@ public class ReportSummaryCalculatorTests
         ];
 
         // Act
-        var summary = ReportSummaryCalculator.Summarize(entries, Now);
+        var summary = ReportSummaryCalculator.Summarize(schedule, Now);
 
         // Assert
-        Assert.Equal(5, summary.TotalCount);
         Assert.Equal(1, summary.CompletedCount);
         Assert.Equal(1, summary.CancelledCount);
         Assert.Equal(2, summary.UpcomingCount);
         Assert.Equal(1, summary.UnclosedCount);
-        Assert.Equal(1, summary.PaidCount);
     }
 
     [Fact]
-    public void Summarize_PastScheduledEntry_CountsAsUnclosed()
+    public void Summarize_PastScheduledLesson_CountsAsUnclosed()
     {
         // Arrange — a lesson the tutor never marked completed or cancelled.
-        IReadOnlyList<ScheduleEntry> entries = [Entry(Now.AddMinutes(-1))];
+        IReadOnlyList<Lesson> schedule = [Entry(Now.AddMinutes(-1))];
 
         // Act
-        var summary = ReportSummaryCalculator.Summarize(entries, Now);
+        var summary = ReportSummaryCalculator.Summarize(schedule, Now);
 
         // Assert
         Assert.Equal(1, summary.UnclosedCount);
@@ -99,13 +88,13 @@ public class ReportSummaryCalculatorTests
     }
 
     [Fact]
-    public void Summarize_EntryStartingExactlyNow_CountsAsUpcoming()
+    public void Summarize_LessonStartingExactlyNow_CountsAsUpcoming()
     {
         // Arrange — the boundary is inclusive on the upcoming side.
-        IReadOnlyList<ScheduleEntry> entries = [Entry(Now)];
+        IReadOnlyList<Lesson> schedule = [Entry(Now)];
 
         // Act
-        var summary = ReportSummaryCalculator.Summarize(entries, Now);
+        var summary = ReportSummaryCalculator.Summarize(schedule, Now);
 
         // Assert
         Assert.Equal(1, summary.UpcomingCount);
@@ -113,29 +102,28 @@ public class ReportSummaryCalculatorTests
     }
 
     [Fact]
-    public void Summarize_CancelledEntries_ExcludedFromPlannedIncome()
+    public void Summarize_CancelledLessons_ExcludedFromPlannedIncome()
     {
         // Arrange
-        IReadOnlyList<ScheduleEntry> entries =
+        IReadOnlyList<Lesson> schedule =
         [
             Entry(Now.AddDays(1), price: 300m),
             Entry(Now.AddDays(2), LessonStatus.Cancelled, price: 500m),
         ];
 
         // Act
-        var summary = ReportSummaryCalculator.Summarize(entries, Now);
+        var summary = ReportSummaryCalculator.Summarize(schedule, Now);
 
         // Assert — a cancelled lesson is owed nothing, so it never enters the money figures.
         Assert.Equal(300m, summary.PlannedIncome);
         Assert.Equal(0m, summary.ActualIncome);
-        Assert.Equal(300m, summary.OutstandingIncome);
     }
 
     [Fact]
     public void Summarize_PartiallyPaidSchedule_ComputesActualAndOutstanding()
     {
         // Arrange
-        IReadOnlyList<ScheduleEntry> entries =
+        IReadOnlyList<Lesson> schedule =
         [
             Entry(Now.AddDays(-3), LessonStatus.Completed, price: 300m, isPaid: true),
             Entry(Now.AddDays(-2), LessonStatus.Completed, price: 250m, isPaid: true),
@@ -143,34 +131,31 @@ public class ReportSummaryCalculatorTests
         ];
 
         // Act
-        var summary = ReportSummaryCalculator.Summarize(entries, Now);
+        var summary = ReportSummaryCalculator.Summarize(schedule, Now);
 
         // Assert
         Assert.Equal(1000m, summary.PlannedIncome);
         Assert.Equal(550m, summary.ActualIncome);
-        Assert.Equal(450m, summary.OutstandingIncome);
-        Assert.Equal(2, summary.PaidCount);
     }
 
     [Fact]
-    public void Summarize_VirtualOccurrences_IncludedInPlannedIncome()
+    public void Summarize_FutureSeriesLessons_IncludedInPlannedIncome()
     {
-        // Arrange — unmaterialized series slots are real future income and must be counted.
-        IReadOnlyList<ScheduleEntry> entries =
+        // Arrange — the lessons a series generated ahead are real future income and must be counted.
+        var seriesId = Guid.NewGuid();
+        IReadOnlyList<Lesson> schedule =
         [
             Entry(Now.AddDays(-1), LessonStatus.Completed, price: 200m, isPaid: true),
-            Entry(Now.AddDays(1), price: 200m, isVirtual: true),
-            Entry(Now.AddDays(8), price: 200m, isVirtual: true),
+            Entry(Now.AddDays(1), price: 200m, seriesId: seriesId),
+            Entry(Now.AddDays(8), price: 200m, seriesId: seriesId),
         ];
 
         // Act
-        var summary = ReportSummaryCalculator.Summarize(entries, Now);
+        var summary = ReportSummaryCalculator.Summarize(schedule, Now);
 
         // Assert
-        Assert.Equal(3, summary.TotalCount);
         Assert.Equal(2, summary.UpcomingCount);
         Assert.Equal(600m, summary.PlannedIncome);
         Assert.Equal(200m, summary.ActualIncome);
-        Assert.Equal(400m, summary.OutstandingIncome);
     }
 }

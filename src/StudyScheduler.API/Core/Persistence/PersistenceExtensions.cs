@@ -6,13 +6,21 @@ namespace StudyScheduler.API.Core.Persistence;
 public static class PersistenceExtensions
 {
     /// <summary>
-    /// Registers <see cref="AppDbContext"/> for the "Default" connection via the Aspire client
-    /// integration (health checks, connection retries, telemetry), and the unit of work that
+    /// Registers <see cref="AppDbContext"/> for the "Default" connection and the unit of work that
     /// commits what repositories stage into it.
+    /// The context is registered by hand and then enriched, rather than through Aspire's
+    /// <c>AddNpgsqlDbContext</c>: that helper POOLS the context, and a pooled DbContext may not take
+    /// constructor dependencies — <see cref="AppDbContext"/> needs the scoped tenant to filter by.
+    /// <c>EnrichNpgsqlDbContext</c> adds back everything the integration would have configured
+    /// (health check, connection retries, telemetry).
     /// </summary>
     public static void AddPersistence(this IHostApplicationBuilder builder)
     {
-        builder.AddNpgsqlDbContext<AppDbContext>("Default");
+        var connectionString = builder.Configuration.GetConnectionString("Default")
+            ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
+
+        builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
+        builder.EnrichNpgsqlDbContext<AppDbContext>();
         builder.Services.AddScoped<IUnitOfWork, EfUnitOfWork>();
     }
 

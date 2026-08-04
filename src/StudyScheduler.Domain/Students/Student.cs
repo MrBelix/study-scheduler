@@ -2,24 +2,26 @@ using StudyScheduler.Domain.Primitives;
 
 namespace StudyScheduler.Domain.Students;
 
-public sealed class Student : Entity
+public sealed class Student : Entity, ITutorOwned
 {
     private Student(
         Guid id,
-        long tutorTelegramId,
         string name,
         decimal rate,
         DateTimeOffset createdAtUtc)
         : base(id)
     {
-        TutorTelegramId = tutorTelegramId;
         Name = name;
         Rate = rate;
         CreatedAtUtc = createdAtUtc;
         Status = StudentStatus.Active;
     }
 
-    /// <summary>Telegram id of the tutor this student belongs to. Ownership / scope key.</summary>
+    /// <summary>
+    /// Telegram id of the tutor this student belongs to. Ownership / scope key: persistence stamps it
+    /// from the scope's tenant on insert and filters every read by it, so nothing in the domain — or
+    /// above it — has to carry the owner around.
+    /// </summary>
     public long TutorTelegramId { get; private set; }
 
     public string Name { get; private set; }
@@ -31,21 +33,20 @@ public sealed class Student : Entity
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// A new active student of the current tenant — whoever that is, is persistence's business
+    /// (see <see cref="TutorTelegramId"/>), which is why it is not an argument here.
+    /// </summary>
     public static Result<Student> Create(
-        long tutorTelegramId,
         string name,
         decimal rate,
         DateTimeOffset createdAtUtc)
     {
-        // Programmer error, not user input: the tutor id comes from validated auth data.
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(tutorTelegramId);
-
         if (Validate(name, rate) is { Count: > 0 } errors)
             return Result<Student>.Failure([.. errors]);
 
         return Result<Student>.Success(new Student(
             Guid.NewGuid(),
-            tutorTelegramId,
             name.Trim(),
             rate,
             createdAtUtc));

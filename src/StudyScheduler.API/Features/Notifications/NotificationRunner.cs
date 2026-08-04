@@ -1,7 +1,5 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using StudyScheduler.API.Core.Persistence;
-using StudyScheduler.API.Core.Scheduling;
+using StudyScheduler.API.Core.Tenancy;
 using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Students;
@@ -11,25 +9,27 @@ namespace StudyScheduler.API.Features.Notifications;
 
 /// <summary>
 /// One tick of notification delivery: for every notifiable tutor, plans the due reminders/follow-ups
-/// off their merged schedule, obtains a persisted physical lesson (materializing and saving a virtual
-/// slot up-front so its id is durable before any message goes out), sends the message and — only on a
-/// settled outcome — records the send and commits the flag. Each send is committed on its own, so one
-/// blocked chat never blocks another; a transient failure leaves the lesson persisted-but-unmarked to
-/// be retried against the same id next tick. If a send comes back <see cref="TelegramSendResult.Unreachable"/>
-/// (a 403) the tutor's bot flag is flipped off and the rest of their due notifications are skipped for
-/// this tick. Per-tutor failures are isolated.
+/// off their schedule, re-reads the lesson as the tracked row it is, sends the message and — only on a
+/// settled outcome — records the send and commits the flag. Every lesson already exists as a row when
+/// it is planned (a series generates its lessons months ahead), so the buttons carry an id that is
+/// durable before anything goes out. Each send is committed on its own, so one blocked chat never
+/// blocks another; a transient failure leaves the lesson unmarked to be retried against the same id
+/// next tick. If a send comes back <see cref="TelegramSendResult.Unreachable"/> (a 403) the tutor's
+/// bot flag is flipped off and the rest of their due notifications are skipped for this tick.
+/// Per-tutor failures are isolated.
+/// The tick has no tenant of its own: it reads the notifiable profiles across all tutors, then makes
+/// each tutor the scope's tenant before touching anything of theirs — which is what scopes every
+/// lesson and student read below to that one tutor.
 /// </summary>
 public sealed class NotificationRunner(
     ITutorProfileRepository profiles,
-    ScheduleReader schedule,
     ILessonRepository lessons,
-    ILessonSeriesRepository seriesRepo,
-    LessonMaterializer materializer,
     IStudentRepository students,
     INotificationSender sender,
     NotificationPlanner planner,
     NotificationText text,
     IUnitOfWork uow,
+    ITutorScope tenant,
     TimeProvider clock,
     IOptions<NotificationsOptions> options,
     ILogger<NotificationRunner> logger)
@@ -39,7 +39,7 @@ public sealed class NotificationRunner(
         var now = clock.GetUtcNow();
         var lookback = options.Value.FollowUpLookbackMinutes;
 
-        foreach (var profile in await profiles.GetNotifiableAsync(ct))
+        foreach (var profile in await profiles.GetNotifiableAcrossAllTutorsAsync(ct))
         {
             try
             {
@@ -59,17 +59,19 @@ public sealed class NotificationRunner(
 
     private async Task RunForTutorAsync(TutorProfile profile, DateTimeOffset now, int lookback, CancellationToken ct)
     {
-        var tutorId = profile.TelegramUserId;
+        // From here on the scope IS this tutor: every lesson and student read below is theirs.
+        tenant.SetForBackground(profile.TelegramUserId);
+
         var from = now.AddMinutes(-lookback);
         var to = now.AddMinutes(profile.RemindMinutes ?? 0);
 
-        var entries = await schedule.GetScheduleAsync(tutorId, from, to, ct: ct);
-        var due = planner.Plan(profile, entries, now, lookback);
+        var schedule = await lessons.GetInRangeAsync(from, to, ct: ct);
+        var due = planner.Plan(profile, schedule, now, lookback);
         if (due.Count == 0)
             return;
 
-        var studentIds = due.Select(d => d.Entry.StudentId).Distinct().ToList();
-        var names = (await students.GetByIdsAsync(tutorId, studentIds, ct))
+        var studentIds = due.Select(d => d.Lesson.StudentId).Distinct().ToList();
+        var names = (await students.GetByIdsAsync(studentIds, ct))
             .ToDictionary(s => s.Id, s => s.Name);
         var lang = profile.LanguageCode ?? AppLanguage.Uk;
 
@@ -83,7 +85,7 @@ public sealed class NotificationRunner(
     }
 
     /// <summary>
-    /// Materializes/loads a persisted lesson, sends its message and settles the outcome. Returns
+    /// Loads the lesson as a tracked row, sends its message and settles the outcome. Returns
     /// <c>true</c> if the tutor's bot is still reachable (keep processing their queue) and
     /// <c>false</c> when a 403 flipped the reachability flag off (stop processing this tutor).
     /// </summary>
@@ -96,67 +98,19 @@ public sealed class NotificationRunner(
         CancellationToken ct)
     {
         var tutorId = profile.TelegramUserId;
-        var entry = d.Entry;
 
-        // 1. Obtain a persisted lesson. A virtual slot is materialized and saved up-front so the
-        //    follow-up buttons carry a lesson id that is already durable in the DB; a physical lesson
-        //    is loaded tracked (already persisted, so no pre-save).
-        Lesson lesson;
-        if (entry.IsVirtual)
-        {
-            var series = await seriesRepo.GetByIdAsync(entry.SeriesId!.Value, tutorId, ct: ct);
-            if (series is null)
-            {
-                logger.LogWarning(
-                    "Series {SeriesId} behind virtual slot {OccurrenceDate} not found; skipping {Kind}",
-                    entry.SeriesId, entry.OccurrenceDate, d.Kind);
-                return true;
-            }
+        // 1. The planner read an untracked snapshot; the authoritative row is the tracked one.
+        var lesson = await lessons.GetByIdAsync(d.Lesson.Id, track: true, ct);
+        if (lesson is null)
+            return true;
 
-            var occ = new LessonOccurrence(entry.OccurrenceDate!.Value, entry.StartUtc, entry.EndUtc);
-            lesson = await materializer.MaterializeSlotAsync(series, occ, ct);
-
-            lessons.Add(lesson);
-            try
-            {
-                await uow.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException ex) when (SqlErrors.IsDuplicateKey(ex))
-            {
-                // A concurrent materialization (an occurrence PATCH or the webhook) won this slot
-                // first. Discard the doomed insert and adopt the row that actually landed so the
-                // send targets a real, persisted id.
-                uow.DiscardChanges();
-                var persisted = await lessons.GetBySeriesOccurrenceAsync(
-                    entry.SeriesId!.Value, entry.OccurrenceDate!.Value, tutorId, track: true, ct);
-                if (persisted is null)
-                {
-                    logger.LogWarning(
-                        "Slot {OccurrenceDate} of series {SeriesId} vanished after a materialization race; skipping {Kind}",
-                        entry.OccurrenceDate, entry.SeriesId, d.Kind);
-                    return true;
-                }
-
-                lesson = persisted;
-            }
-        }
-        else
-        {
-            var existing = await lessons.GetByIdAsync(entry.Id!.Value, tutorId, track: true, ct);
-            if (existing is null)
-                return true;
-
-            lesson = existing;
-        }
-
-        // 2. Concurrency guard: the planner read an untracked snapshot; the now-authoritative lesson
-        //    is the tracked/persisted row. If it was already sent since, do nothing.
+        // 2. Concurrency guard: if the notification was already sent since the snapshot, do nothing.
         if (d.Kind == NotificationKind.Reminder && lesson.Notifications.IsReminderSent)
             return true;
         if (d.Kind == NotificationKind.FollowUp && lesson.Notifications.IsFollowUpSent)
             return true;
 
-        // 3. Build the message off the now-persisted lesson id.
+        // 3. Build the message off the persisted lesson id.
         var name = names.GetValueOrDefault(lesson.StudentId, "");
         string body;
         IReadOnlyList<NotificationButton> buttons;
@@ -175,12 +129,11 @@ public sealed class NotificationRunner(
         // 4. Send.
         var result = await sender.SendAsync(tutorId, body, buttons, ct);
 
-        // 5. Settle by outcome. Ordering is persist-before-send throughout, so a materialized slot
-        //    is already durable regardless of the send result.
+        // 5. Settle by outcome. The lesson is persisted either way — only the sent flag is at stake.
         switch (result)
         {
             case TelegramSendResult.TransientFailure:
-                // Mark nothing: the lesson stays persisted and is retried against the SAME id next tick.
+                // Mark nothing: the lesson is retried against the SAME id next tick.
                 logger.LogWarning(
                     "Transient failure sending {Kind} for lesson {LessonId} to tutor {TutorId}; will retry against the same id",
                     d.Kind, lesson.Id, tutorId);

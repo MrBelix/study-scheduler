@@ -42,6 +42,9 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
                     b.Property<DateTime>("EndUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("IsCustomized")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsPaid")
                         .HasColumnType("boolean");
 
@@ -94,7 +97,12 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
 
                     b.HasIndex("TutorTelegramId", "StartUtc");
 
-                    b.ToTable("Lessons", (string)null);
+                    b.ToTable("Lessons", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Lessons_SeriesSlotPair", "(\"SeriesId\" IS NULL) = (\"OccurrenceDate\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_Lessons_TutorTelegramIdPositive", "\"TutorTelegramId\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("StudyScheduler.Domain.Lessons.LessonSeries", b =>
@@ -155,7 +163,10 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
 
                     b.HasIndex("TutorTelegramId");
 
-                    b.ToTable("LessonSeries", (string)null);
+                    b.ToTable("LessonSeries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_LessonSeries_TutorTelegramIdPositive", "\"TutorTelegramId\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("StudyScheduler.Domain.Students.Student", b =>
@@ -188,7 +199,10 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
 
                     b.HasIndex("TutorTelegramId");
 
-                    b.ToTable("Students", (string)null);
+                    b.ToTable("Students", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Students_TutorTelegramIdPositive", "\"TutorTelegramId\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("StudyScheduler.Domain.Tutors.TutorProfile", b =>
@@ -222,7 +236,18 @@ namespace StudyScheduler.API.Core.Persistence.Migrations
 
                     b.HasKey("TelegramUserId");
 
-                    b.ToTable("TutorProfiles", (string)null);
+                    b.ToTable("TutorProfiles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TutorProfiles_TelegramUserIdPositive", "\"TelegramUserId\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("StudyScheduler.Domain.Lessons.Lesson", b =>
+                {
+                    b.HasOne("StudyScheduler.Domain.Lessons.LessonSeries", null)
+                        .WithMany()
+                        .HasForeignKey("SeriesId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 #pragma warning restore 612, 618
         }

@@ -8,7 +8,11 @@ internal sealed class LessonSeriesConfiguration : IEntityTypeConfiguration<Lesso
 {
     public void Configure(EntityTypeBuilder<LessonSeries> builder)
     {
-        builder.ToTable("LessonSeries");
+        // Ownership is positive by construction (a Telegram id is), and the database says so: 0 is
+        // the "no tenant" sentinel the query filters fall back to, so a row wearing it would be
+        // visible to every tenant-less scope. The constraint makes that row unwritable.
+        builder.ToTable("LessonSeries", t => t.HasCheckConstraint(
+            "CK_LessonSeries_TutorTelegramIdPositive", "\"TutorTelegramId\" > 0"));
         builder.HasKey(s => s.Id);
 
         builder.Property(s => s.TutorTelegramId).IsRequired();

@@ -1,5 +1,4 @@
 using StudyScheduler.API.Core.RateLimiting;
-using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.Domain.Lessons;
 
 namespace StudyScheduler.API.Features.Lessons;
@@ -15,11 +14,11 @@ public static class LessonsModule
         services.AddScoped<ILessonRepository, EfLessonRepository>();
         services.AddScoped<ILessonSeriesRepository, EfLessonSeriesRepository>();
         services.AddScoped<LessonOverlapChecker>();
-        services.AddScoped<LessonPatchService>();
-        // Core/Scheduling machinery — registered here because Lessons is its primary consumer.
-        services.AddScoped<SeriesExpansion>();
-        services.AddScoped<ScheduleReader>();
-        services.AddScoped<LessonMaterializer>();
+        // The one façade the endpoints, the bot's webhook and the Students feature talk to; lessons
+        // and series alike, reads as much as writes. Everything else here is its machinery.
+        services.AddScoped<LessonService>();
+        services.AddScoped<LessonGenerator>();
+        services.AddHostedService<LessonGenerationService>();
         return services;
     }
 
@@ -28,24 +27,28 @@ public static class LessonsModule
         var group = app.MapGroup("/lessons").RequireAuthorization();
 
         group.MapGet("/", Endpoints.GetMine);
-        group.MapGet("/{id:guid}", Endpoints.GetById);
+        // One create route for both branches of the form: with "repeat" it is a series, without it a
+        // single lesson. The client never picks a route.
         group.MapPost("/", Endpoints.Create)
             .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
-        group.MapPatch("/{id:guid}", Endpoints.Update)
+        // Paying for lessons is one statement about many of them, so it is one request: a batch of
+        // ids rather than a PATCH per lesson.
+        group.MapPost("/settle", Endpoints.Settle)
             .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
 
-        // The {id:guid} constraint keeps the literal "series" segment from binding to GetById.
+        // The literal "series" segment outranks the {id} parameter in routing, so the series routes
+        // below are never shadowed — and the :guid constraint would keep them apart anyway.
         group.MapGet("/series", Endpoints.GetSeriesList);
         group.MapGet("/series/{seriesId:guid}", Endpoints.GetSeriesById);
-        group.MapPost("/series", Endpoints.CreateSeries)
-            .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
         group.MapPatch("/series/{seriesId:guid}", Endpoints.UpdateSeries)
             .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
         group.MapPost("/series/{seriesId:guid}/cancel", Endpoints.CancelSeries)
             .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
 
-        // Mutates a virtual slot by its original scheduled date, materializing it on demand.
-        group.MapPatch("/series/{seriesId:guid}/occurrences/{occurrenceDate}", Endpoints.UpdateOccurrence)
+        // One addressing scheme for every lesson: the id of its row. Anything that is not a GUID
+        // matches no route at all, so it is answered with 404 before a handler is chosen.
+        group.MapGet("/{id:guid}", Endpoints.GetById);
+        group.MapPatch("/{id:guid}", Endpoints.Update)
             .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
 
         return app;

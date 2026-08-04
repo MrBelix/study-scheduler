@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StudyScheduler.API.Core.Persistence;
+using StudyScheduler.API.Core.Tenancy;
 
 namespace StudyScheduler.IntegrationTests;
 
@@ -20,11 +21,22 @@ public sealed class AppFixture : IAsyncLifetime
     /// <summary>
     /// A standalone <see cref="AppDbContext"/> against the containerized database, for tests
     /// that exercise repository/EF behavior the HTTP surface can't reach (e.g. index races).
+    /// Scoped to <paramref name="tutorTelegramId"/> exactly as a request of that tutor would be:
+    /// the global query filters apply here too, so a context sees one tenant's rows and no others.
     /// </summary>
-    public AppDbContext CreateDbContext() =>
+    public AppDbContext CreateDbContext(long tutorTelegramId)
+    {
+        var tenant = new TutorContext();
+        tenant.SetForBackground(tutorTelegramId);
+        return CreateDbContext(tenant);
+    }
+
+    /// <summary>The same, for a test that wants to drive the tenant itself (including not setting one).</summary>
+    public AppDbContext CreateDbContext(TutorContext tenant) =>
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql(_dbConnectionString)
-            .Options);
+            .Options,
+            tenant);
 
     public async Task InitializeAsync()
     {

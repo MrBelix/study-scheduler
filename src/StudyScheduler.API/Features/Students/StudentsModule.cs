@@ -20,7 +20,11 @@ public static class StudentsModule
         var group = app.MapGroup("/students").RequireAuthorization();
 
         group.MapGet("/", Endpoints.GetMine);
+        // Literal segment; the id route below is guid-constrained, so the two never compete.
+        group.MapGet("/archived", Endpoints.GetArchived);
         group.MapGet("/{id:guid}", Endpoints.GetById);
+        // What the details screen's debt banner opens: the lessons the banner sums up.
+        group.MapGet("/{id:guid}/debts", Endpoints.GetDebts);
         group.MapPost("/", Endpoints.Create)
             .RequireRateLimiting(RateLimitingExtensions.WritePolicy);
         group.MapPatch("/{id:guid}", Endpoints.Update)

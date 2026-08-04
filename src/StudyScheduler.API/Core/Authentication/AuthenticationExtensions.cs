@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Authentication;
-
 namespace StudyScheduler.API.Core.Authentication;
 
 public static class AuthenticationExtensions

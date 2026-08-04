@@ -22,7 +22,10 @@ Students/
 - **Encapsulated state.** Properties have private setters; state changes go through intention-revealing
   methods (`UpdateDetails`, `ChangeStatus`) rather than open setters.
 - **Ownership by Telegram id.** A `Student` belongs to a tutor identified by `TutorTelegramId` (`long`)
-  — the natural identity from Telegram. There is no surrogate `Account` entity.
+  — the natural identity from Telegram. There is no surrogate `Account` entity. It is neither a
+  factory argument nor a settable property: persistence stamps it on insert from the scope's tenant,
+  and no repository method takes it — each reads the current tenant, the exceptions saying so in
+  their name (`...AcrossAllTutorsAsync`).
 - **Money is `decimal`, time is `DateTimeOffset` (UTC).**
 - **The domain owns its contracts.** Repository interfaces (e.g. `IStudentRepository`) live here; the
   concrete EF Core implementation lives in `StudyScheduler.API`. The domain depends on nothing.

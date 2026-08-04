@@ -1,299 +1,176 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
-using StudyScheduler.API.Core.Authentication;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using StudyScheduler.API.Core.ErrorHandling;
-using StudyScheduler.API.Core.Scheduling;
 using StudyScheduler.Domain.Lessons;
-using StudyScheduler.Domain.Primitives;
-using StudyScheduler.Domain.Students;
-using StudyScheduler.Domain.Tutors;
 
 namespace StudyScheduler.API.Features.Lessons;
 
-/// <summary>HTTP handlers for the Lessons feature. Wired to routes in <see cref="LessonsModule"/>.</summary>
+/// <summary>
+/// HTTP handlers for the Lessons feature: bind the request, hand it to <see cref="LessonService"/>,
+/// render the outcome. Every scheduling decision — for single lessons and for series alike — lives in
+/// that one service. Wired to routes in <see cref="LessonsModule"/>.
+/// Nothing here names the tutor: the request's identity became the scope's tenant in the tenancy
+/// middleware, and every read and write below is filtered and stamped by it.
+/// </summary>
 internal static class Endpoints
 {
     private const int MaxRangeDays = 366;
 
     /// <summary>
-    /// Lists the current tutor's schedule intersecting <c>[from, to)</c>: physical lessons merged
-    /// with virtual slots expanded on the fly from active series. Reads never write.
+    /// Lists the current tutor's lessons intersecting <c>[from, to)</c>: a plain range query over the
+    /// rows themselves, series lessons included — a series generates them across the whole planning
+    /// horizon, so there is nothing to expand. Reads never write.
     /// </summary>
     public static async Task<Results<Ok<List<LessonResponse>>, ValidationProblem>> GetMine(
         DateTimeOffset from,
         DateTimeOffset to,
         Guid? studentId,
-        ClaimsPrincipal principal,
-        ScheduleReader reader,
+        ILessonRepository lessons,
         CancellationToken ct)
     {
+        // The range is a property of the query string, not of the schedule — so it is checked here.
         if (ValidateRange(from, to) is { } errors)
             return TypedResults.ValidationProblem(errors);
 
-        var schedule = await reader.GetScheduleAsync(principal.GetTelegramId(), from, to, studentId, ct);
+        var schedule = await lessons.GetInRangeAsync(from, to, studentId, ct);
         return TypedResults.Ok(schedule.Select(LessonResponse.From).ToList());
     }
 
-    /// <summary>Returns a single lesson, scoped to the current tutor.</summary>
+    /// <summary>
+    /// Returns a single lesson by its id, scoped to the current tutor — one route for one-off lessons
+    /// and series occurrences alike, since both are ordinary rows. 404 when the id addresses nothing
+    /// of this tutor's.
+    /// </summary>
     public static async Task<Results<Ok<LessonResponse>, NotFound>> GetById(
         Guid id,
-        ClaimsPrincipal principal,
-        ILessonRepository repo,
+        LessonService service,
         CancellationToken ct)
     {
-        var lesson = await repo.GetByIdAsync(id, principal.GetTelegramId(), ct: ct);
+        var lesson = await service.GetAsync(id, ct);
         return lesson is null ? TypedResults.NotFound() : TypedResults.Ok(LessonResponse.From(lesson));
     }
 
-    /// <summary>Creates a one-off lesson at an absolute <c>StartUtc</c>. 409 on collision.</summary>
-    public static async Task<Results<Created<LessonResponse>, ValidationProblem, Conflict<LessonConflictResponse>>> Create(
-        ClaimsPrincipal principal,
+    /// <summary>
+    /// Creates a lesson from the one create form: a one-off when the request carries no
+    /// <c>Repeat</c>, a weekly series when it does — the response says which of the two arrived.
+    /// 409 when the requested time collides, either as a single slot or as a weekly one.
+    /// </summary>
+    public static async Task<Results<Created<CreateLessonResponse>, ValidationProblem, Conflict<LessonConflictResponse>>> Create(
         CreateLessonRequest request,
-        ILessonRepository repo,
-        IStudentRepository studentRepo,
-        LessonOverlapChecker overlapChecker,
-        IUnitOfWork uow,
-        TimeProvider clock,
-        CancellationToken ct)
-    {
-        var tutorId = principal.GetTelegramId();
+        LessonService service,
+        CancellationToken ct) =>
+        ToHttpResult(await service.CreateAsync(request, ct));
 
-        var student = await studentRepo.GetByIdAsync(request.StudentId, tutorId, ct: ct);
-        if (student is null)
-            return StudentNotFound();
-
-        var created = Lesson.Create(
-            tutorId, request.StudentId, request.StartUtc, request.DurationMinutes,
-            request.Price ?? student.Rate, clock.GetUtcNow(), request.Topic, request.Description);
-        if (!created.IsSuccess)
-            return created.ToValidationProblem();
-        var lesson = created.Value;
-
-        var conflicts = await overlapChecker.CheckLessonAsync(
-            tutorId, request.StartUtc, request.StartUtc.AddMinutes(request.DurationMinutes), ct: ct);
-        if (conflicts.Count > 0)
-            return Conflict(conflicts);
-
-        repo.Add(lesson);
-        await uow.SaveChangesAsync(ct);
-        return TypedResults.Created($"/lessons/{lesson.Id}", LessonResponse.From(lesson));
-    }
-
-    /// <summary>Partially updates a physical lesson, scoped to the current tutor.</summary>
+    /// <summary>
+    /// Partially updates the lesson behind an id, scoped to the current tutor — one route for one-off
+    /// lessons and single series occurrences alike.
+    /// 404 when the id addresses nothing of this tutor's.
+    /// </summary>
     public static async Task<Results<Ok<LessonResponse>, NotFound, ValidationProblem, Conflict<LessonConflictResponse>>> Update(
         Guid id,
-        ClaimsPrincipal principal,
         UpdateLessonRequest request,
-        ILessonRepository repo,
-        LessonPatchService patchService,
+        LessonService service,
         CancellationToken ct)
     {
-        var tutorId = principal.GetTelegramId();
+        var outcome = await service.UpdateAsync(id, request, ct);
+        return outcome is null ? TypedResults.NotFound() : ToHttpResult(outcome);
+    }
 
-        var lesson = await repo.GetByIdAsync(id, tutorId, track: true, ct);
-        if (lesson is null)
-            return TypedResults.NotFound();
-
-        return ToHttpResult(await patchService.ApplyAsync(lesson, request, tutorId, isNew: false, ct: ct));
+    /// <summary>
+    /// Marks a batch of lessons as paid in one request — what the student's debts screen does when the
+    /// tutor is finally handed the money. All or nothing: see
+    /// <see cref="LessonService.SettleAsync"/> for what refuses a batch and what is a harmless no-op.
+    /// 400 (validation) whenever the selection cannot be honoured as sent; ids of another tutor's
+    /// lessons are among those, since the scoped lookup cannot resolve them at all.
+    /// </summary>
+    public static async Task<Results<Ok<SettleLessonsResponse>, ValidationProblem>> Settle(
+        SettleLessonsRequest request,
+        LessonService service,
+        CancellationToken ct)
+    {
+        var settled = await service.SettleAsync(request.LessonIds ?? [], ct);
+        return settled.IsSuccess
+            ? TypedResults.Ok(new SettleLessonsResponse(settled.Value))
+            : settled.ToValidationProblem();
     }
 
     /// <summary>Lists the current tutor's series (active and ended).</summary>
     public static async Task<Ok<List<LessonSeriesResponse>>> GetSeriesList(
-        ClaimsPrincipal principal,
         ILessonSeriesRepository repo,
         CancellationToken ct)
     {
-        var series = await repo.GetAllByTutorAsync(principal.GetTelegramId(), ct);
+        var series = await repo.GetAllAsync(ct);
         return TypedResults.Ok(series.Select(LessonSeriesResponse.From).ToList());
     }
 
     /// <summary>Returns a single series, scoped to the current tutor.</summary>
     public static async Task<Results<Ok<LessonSeriesResponse>, NotFound>> GetSeriesById(
         Guid seriesId,
-        ClaimsPrincipal principal,
         ILessonSeriesRepository repo,
         CancellationToken ct)
     {
-        var series = await repo.GetByIdAsync(seriesId, principal.GetTelegramId(), ct: ct);
+        var series = await repo.GetByIdAsync(seriesId, ct: ct);
         return series is null ? TypedResults.NotFound() : TypedResults.Ok(LessonSeriesResponse.From(series));
     }
 
     /// <summary>
-    /// Creates a weekly series anchored in the tutor's profile time zone. Lessons are not written
-    /// here — the first read expands them. 409 if the weekly slot collides.
+    /// Edits a series in full — name, price, weekly schedule and the date it runs until. See
+    /// <see cref="LessonService.UpdateSeriesAsync"/> for what a schedule change does to the lessons
+    /// already generated from the previous one, and what <c>keepCustomized</c> decides.
     /// </summary>
-    public static async Task<Results<Created<LessonSeriesResponse>, ValidationProblem, Conflict<LessonConflictResponse>>> CreateSeries(
-        ClaimsPrincipal principal,
-        CreateLessonSeriesRequest request,
-        ILessonSeriesRepository repo,
-        IStudentRepository studentRepo,
-        ITutorProfileRepository profileRepo,
-        LessonOverlapChecker overlapChecker,
-        IUnitOfWork uow,
-        TimeProvider clock,
-        CancellationToken ct)
-    {
-        var tutorId = principal.GetTelegramId();
-
-        // Friendlier, example-bearing message than the domain's for the most common request error.
-        if (!request.Weekdays.IsValidSet())
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["Weekdays"] = ["At least one weekday is required (e.g. \"Monday, Thursday\")."],
-            });
-
-        var profile = await profileRepo.GetAsync(tutorId, ct);
-        if (profile is null)
-            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["Profile"] = ["Set your time zone first via PUT /profile — series times are defined in it."],
-            });
-
-        var student = await studentRepo.GetByIdAsync(request.StudentId, tutorId, ct: ct);
-        if (student is null)
-            return StudentNotFound();
-
-        var pattern = WeeklyPattern.Create(request.Weekdays, request.StartTimeLocal, request.DurationMinutes, profile.TimeZone);
-        if (!pattern.IsSuccess)
-            return pattern.ToValidationProblem();
-
-        var created = LessonSeries.Create(
-            tutorId, request.StudentId, pattern.Value, request.StartDate, clock.GetUtcNow(),
-            request.Title, request.EndDate, request.Price);
-        if (!created.IsSuccess)
-            return created.ToValidationProblem();
-        var series = created.Value;
-
-        var conflicts = await overlapChecker.CheckSeriesAsync(series, ct);
-        if (conflicts.Count > 0)
-            return Conflict(conflicts);
-
-        repo.Add(series);
-        await uow.SaveChangesAsync(ct);
-        return TypedResults.Created($"/lessons/series/{series.Id}", LessonSeriesResponse.From(series));
-    }
-
-    /// <summary>Updates a series' metadata (title, price). The schedule is not editable here.</summary>
-    public static async Task<Results<Ok<LessonSeriesResponse>, NotFound, ValidationProblem>> UpdateSeries(
+    public static async Task<Results<Ok<UpdateSeriesResponse>, NotFound, ValidationProblem, Conflict<LessonConflictResponse>>> UpdateSeries(
         Guid seriesId,
-        ClaimsPrincipal principal,
         UpdateLessonSeriesRequest request,
-        ILessonSeriesRepository repo,
-        IUnitOfWork uow,
+        LessonService service,
         CancellationToken ct)
     {
-        var series = await repo.GetByIdAsync(seriesId, principal.GetTelegramId(), track: true, ct);
-        if (series is null)
-            return TypedResults.NotFound();
-
-        var updated = series.UpdateDetails(
-            request.Title ?? series.Title, series.EndDate, request.Price ?? series.Price);
-        if (!updated.IsSuccess)
-            return updated.ToValidationProblem();
-
-        repo.Update(series);
-        await uow.SaveChangesAsync(ct);
-        return TypedResults.Ok(LessonSeriesResponse.From(series));
+        var outcome = await service.UpdateSeriesAsync(seriesId, request, ct);
+        return outcome switch
+        {
+            null => TypedResults.NotFound(),
+            SeriesUpdateOutcome.Ok ok => TypedResults.Ok(new UpdateSeriesResponse(
+                LessonSeriesResponse.From(ok.Change.Series), ToResponses(ok.Change.RemovedLessons))),
+            SeriesUpdateOutcome.Validation validation => validation.Failure.ToValidationProblem(),
+            SeriesUpdateOutcome.Conflict conflict => Conflict(conflict.Conflicts),
+            _ => throw new InvalidOperationException($"Unhandled series outcome '{outcome.GetType().Name}'."),
+        };
     }
 
     /// <summary>
-    /// Cancels a series effective immediately (in its own time zone): its last possible lesson day
-    /// becomes yesterday, so today's virtual occurrence stops expanding along with all future ones.
-    /// Today's occurrence that has ALREADY STARTED (or is over) is materialized first, so it survives
-    /// as a physical <c>Scheduled</c> row — an in-progress/past lesson is never silently dropped. A
-    /// still-upcoming today occurrence (<c>StartUtc &gt; now</c>) is left virtual and correctly dropped.
-    /// Any future materialized overrides are removed and reported so the client can notify the user.
-    /// Existing materialized rows for today and the past are physical and left untouched.
+    /// Cancels a series effective immediately — see <see cref="LessonService.CancelSeriesAsync"/> for
+    /// what happens to today's occurrence and to the lessons beyond it. The body is optional: sending
+    /// none means the default, "keep the occurrences I edited by hand".
     /// </summary>
     public static async Task<Results<Ok<CancelSeriesResponse>, NotFound>> CancelSeries(
         Guid seriesId,
-        ClaimsPrincipal principal,
-        ILessonSeriesRepository seriesRepo,
-        ILessonRepository lessonRepo,
-        LessonMaterializer materializer,
-        IUnitOfWork uow,
-        TimeProvider clock,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CancelLessonSeriesRequest? request,
+        LessonService service,
         CancellationToken ct)
     {
-        var tutorId = principal.GetTelegramId();
+        var change = await service.CancelSeriesAsync(
+            seriesId, request ?? new CancelLessonSeriesRequest(), ct);
+        return change is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(new CancelSeriesResponse(
+                LessonSeriesResponse.From(change.Series), ToResponses(change.RemovedLessons)));
+    }
 
-        var series = await seriesRepo.GetByIdAsync(seriesId, tutorId, track: true, ct);
-        if (series is null)
-            return TypedResults.NotFound();
-
-        var now = clock.GetUtcNow();
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, series.Pattern.TimeZone).DateTime);
-
-        // Preserve today's already-happened occurrence. Evaluated BEFORE CancelAsOf (GetOccurrences
-        // clips to the CURRENT EndDate): a today occurrence that has already started/passed but is
-        // still virtual is materialized into a physical Scheduled row so it is not lost when EndDate is
-        // tightened to yesterday. A still-upcoming today occurrence is left alone and dropped.
-        foreach (var occ in series.GetOccurrences(today, today))
+    /// <summary>Maps the create orchestration's outcome onto the endpoint's HTTP result union.</summary>
+    private static Results<Created<CreateLessonResponse>, ValidationProblem, Conflict<LessonConflictResponse>> ToHttpResult(
+        CreateLessonOutcome outcome) =>
+        outcome switch
         {
-            if (occ.StartUtc > now)
-                continue; // Still upcoming today → correctly dropped by CancelAsOf.
-
-            var existing = await lessonRepo.GetBySeriesOccurrenceAsync(seriesId, today, tutorId, track: true, ct);
-            if (existing is not null)
-                continue; // Already physical → survives untouched.
-
-            var lesson = await materializer.MaterializeSlotAsync(series, occ, ct);
-            lessonRepo.Add(lesson);
-        }
-
-        series.CancelAsOf(now);
-
-        // Remove future overrides (materialized rows beyond today) — they belong to a schedule that
-        // no longer exists. Today's (including the just-materialized) and past rows stay.
-        var removed = await lessonRepo.GetMaterializedForSeriesFromAsync(seriesId, tutorId, today.AddDays(1), track: true, ct);
-        foreach (var lesson in removed)
-            lessonRepo.Remove(lesson);
-
-        seriesRepo.Update(series);
-        await uow.SaveChangesAsync(ct);
-
-        return TypedResults.Ok(new CancelSeriesResponse(
-            LessonSeriesResponse.From(series), removed.Select(LessonResponse.From).ToList()));
-    }
-
-    /// <summary>
-    /// Mutates one slot of a series by its original scheduled date, materializing it on demand: if
-    /// no physical lesson exists yet, one is instantiated from the series, the patch is applied and
-    /// saved — so topics, cancellations and reschedules of single occurrences never need
-    /// pre-materialized rows.
-    /// </summary>
-    public static async Task<Results<Ok<LessonResponse>, NotFound, ValidationProblem, Conflict<LessonConflictResponse>>> UpdateOccurrence(
-        Guid seriesId,
-        DateOnly occurrenceDate,
-        ClaimsPrincipal principal,
-        UpdateLessonRequest request,
-        ILessonSeriesRepository seriesRepo,
-        ILessonRepository repo,
-        LessonMaterializer materializer,
-        LessonPatchService patchService,
-        CancellationToken ct)
-    {
-        var tutorId = principal.GetTelegramId();
-
-        var series = await seriesRepo.GetByIdAsync(seriesId, tutorId, ct: ct);
-        if (series is null)
-            return TypedResults.NotFound();
-
-        // Already materialized — behave exactly like PATCH /lessons/{id}.
-        var existing = await repo.GetBySeriesOccurrenceAsync(seriesId, occurrenceDate, tutorId, track: true, ct);
-        if (existing is not null)
-            return ToHttpResult(await patchService.ApplyAsync(existing, request, tutorId, isNew: false, ct: ct));
-
-        // The date must be an actual virtual slot of the series (weekday + date window).
-        var slot = series.GetOccurrences(occurrenceDate, occurrenceDate);
-        if (slot.Count == 0)
-            return TypedResults.NotFound();
-
-        var lesson = await materializer.MaterializeSlotAsync(series, slot[0], ct);
-        return ToHttpResult(await patchService.ApplyAsync(
-            lesson, request, tutorId, isNew: true,
-            excludeOccurrence: new SeriesSlot(seriesId, occurrenceDate), ct: ct));
-    }
+            CreateLessonOutcome.LessonCreated created => TypedResults.Created(
+                $"/lessons/{created.Lesson.Id}",
+                new CreateLessonResponse(LessonResponse.From(created.Lesson), null)),
+            CreateLessonOutcome.SeriesCreated created => TypedResults.Created(
+                $"/lessons/series/{created.Series.Id}",
+                new CreateLessonResponse(null, LessonSeriesResponse.From(created.Series))),
+            CreateLessonOutcome.Validation validation => validation.Failure.ToValidationProblem(),
+            CreateLessonOutcome.Conflict conflict => Conflict(conflict.Conflicts),
+            _ => throw new InvalidOperationException($"Unhandled create outcome '{outcome.GetType().Name}'."),
+        };
 
     /// <summary>Maps the patch pipeline's outcome onto the endpoints' HTTP result union.</summary>
     private static Results<Ok<LessonResponse>, NotFound, ValidationProblem, Conflict<LessonConflictResponse>> ToHttpResult(
@@ -303,8 +180,6 @@ internal static class Endpoints
             LessonPatchOutcome.Ok ok => TypedResults.Ok(LessonResponse.From(ok.Lesson)),
             LessonPatchOutcome.Validation validation => validation.Failure.ToValidationProblem(),
             LessonPatchOutcome.Conflict conflict => Conflict(conflict.Conflicts),
-            LessonPatchOutcome.ConcurrentMaterialization => TypedResults.Conflict(new LessonConflictResponse(
-                "The slot was modified concurrently. Retry the request.", [])),
             _ => throw new InvalidOperationException($"Unhandled patch outcome '{outcome.GetType().Name}'."),
         };
 
@@ -319,13 +194,8 @@ internal static class Endpoints
         return errors.Count == 0 ? null : errors;
     }
 
-    // Same message whether the student is missing or belongs to another tutor — existence must not
-    // leak across tenants.
-    private static ValidationProblem StudentNotFound() =>
-        TypedResults.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["StudentId"] = ["Student not found."],
-        });
+    private static List<LessonResponse> ToResponses(IReadOnlyList<Lesson> lessons) =>
+        lessons.Select(LessonResponse.From).ToList();
 
     private static Conflict<LessonConflictResponse> Conflict(IReadOnlyList<LessonConflict> conflicts) =>
         TypedResults.Conflict(new LessonConflictResponse(

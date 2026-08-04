@@ -17,7 +17,6 @@ public class LessonSeriesTests
         decimal? price = null,
         Weekdays days = Weekdays.Monday | Weekdays.Thursday) =>
         LessonSeries.Create(
-            tutorTelegramId: 555,
             studentId: Guid.NewGuid(),
             pattern: Pattern(days),
             startDate: start ?? new DateOnly(2026, 7, 6), // a Monday
@@ -31,7 +30,8 @@ public class LessonSeriesTests
         var series = NewSeries(price: 300m);
 
         Assert.NotEqual(Guid.Empty, series.Id);
-        Assert.Equal(555, series.TutorTelegramId);
+        // Ownership is not the factory's to give: persistence stamps the scope's tutor on insert.
+        Assert.Equal(0, series.TutorTelegramId);
         Assert.Equal(Weekdays.Monday | Weekdays.Thursday, series.Pattern.Days);
         Assert.Equal(new TimeOnly(16, 0), series.Pattern.StartTimeLocal);
         Assert.Equal(300m, series.Price);
@@ -41,7 +41,7 @@ public class LessonSeriesTests
     public void Create_EndDateBeforeStart_Fails()
     {
         var result = LessonSeries.Create(
-            555, Guid.NewGuid(), Pattern(), new DateOnly(2026, 7, 6), CreatedAt, endDate: new DateOnly(2026, 7, 5));
+            Guid.NewGuid(), Pattern(), new DateOnly(2026, 7, 6), CreatedAt, endDate: new DateOnly(2026, 7, 5));
 
         Assert.False(result.IsSuccess);
         Assert.Equal("LessonSeries.EndDateBeforeStartDate", Assert.Single(result.Errors).Code);
@@ -51,7 +51,7 @@ public class LessonSeriesTests
     public void Create_NegativePrice_Fails()
     {
         var result = LessonSeries.Create(
-            555, Guid.NewGuid(), Pattern(), new DateOnly(2026, 7, 6), CreatedAt, price: -1m);
+            Guid.NewGuid(), Pattern(), new DateOnly(2026, 7, 6), CreatedAt, price: -1m);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("LessonSeries.NegativePrice", Assert.Single(result.Errors).Code);
@@ -68,6 +68,31 @@ public class LessonSeriesTests
 
         // Only Thu 09 and Mon 13 fall inside [09, 13] on Mon/Thu.
         Assert.Equal(new[] { new DateOnly(2026, 7, 9), new DateOnly(2026, 7, 13) }, dates);
+    }
+
+    [Fact]
+    public void HasSlotOn_AnyDateAroundTheWindow_AgreesWithGetOccurrences()
+    {
+        // Arrange — a Mon/Thu series bounded on both ends.
+        var series = NewSeries(start: new DateOnly(2026, 7, 6), end: new DateOnly(2026, 7, 20));
+
+        // Act & Assert
+        // The cheap predicate is the enumeration's contract in closed form: it must never disagree,
+        // whether the date is off the weekday mask or outside [StartDate, EndDate].
+        for (var date = new DateOnly(2026, 6, 29); date <= new DateOnly(2026, 7, 27); date = date.AddDays(1))
+            Assert.Equal(series.GetOccurrences(date, date).Count == 1, series.HasSlotOn(date));
+    }
+
+    [Fact]
+    public void HasSlotOn_OpenEndedSeries_HasNoUpperBound()
+    {
+        // Arrange
+        var series = NewSeries(start: new DateOnly(2026, 7, 6));
+
+        // Act & Assert
+        Assert.True(series.HasSlotOn(new DateOnly(2027, 1, 4)));  // a far-future Monday still counts
+        Assert.False(series.HasSlotOn(new DateOnly(2026, 7, 7)));  // Tuesday is off the mask
+        Assert.False(series.HasSlotOn(new DateOnly(2026, 6, 29))); // a Monday before StartDate
     }
 
     [Fact]
@@ -138,13 +163,39 @@ public class LessonSeriesTests
     }
 
     [Fact]
-    public void UpdateDetails_EndDateBeforeStart_Fails()
+    public void Update_NewPattern_ReplacesTheScheduleInPlace()
     {
+        // Arrange
+        // A schedule change is an ordinary edit now: the rule keeps its identity and its start date,
+        // and the rows generated from the previous pattern are the caller's business.
         var series = NewSeries(start: new DateOnly(2026, 7, 6));
 
-        var result = series.UpdateDetails("New", new DateOnly(2026, 7, 5), null);
+        // Act
+        var result = series.Update("New", Pattern(Weekdays.Tuesday), new DateOnly(2026, 8, 31), 250m);
 
+        // Assert
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Weekdays.Tuesday, series.Pattern.Days);
+        Assert.Equal(new DateOnly(2026, 7, 6), series.StartDate);
+        Assert.Equal(new DateOnly(2026, 8, 31), series.EndDate);
+        Assert.Equal(250m, series.Price);
+        Assert.Equal("New", series.Title);
+    }
+
+    [Fact]
+    public void Update_EndDateBeforeStart_FailsWithoutMutating()
+    {
+        // Arrange
+        var series = NewSeries(start: new DateOnly(2026, 7, 6));
+
+        // Act
+        var result = series.Update("New", Pattern(Weekdays.Tuesday), new DateOnly(2026, 7, 5), null);
+
+        // Assert
         Assert.False(result.IsSuccess);
         Assert.Equal("LessonSeries.EndDateBeforeStartDate", Assert.Single(result.Errors).Code);
+        // A refused edit leaves the rule exactly as it was — pattern included.
+        Assert.Equal(Weekdays.Monday | Weekdays.Thursday, series.Pattern.Days);
+        Assert.Null(series.EndDate);
     }
 }

@@ -48,6 +48,14 @@ public sealed record WeeklyPattern
     }
 
     /// <summary>
+    /// The calendar day <paramref name="instant"/> falls on in <see cref="TimeZone"/> — the same local
+    /// day the series' own dates (start, end, occurrence) are expressed in. The pattern owns the zone,
+    /// so "which day is it for this schedule" is answered here rather than at each call site.
+    /// </summary>
+    public DateOnly LocalDateOf(DateTimeOffset instant) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, TimeZone).DateTime);
+
+    /// <summary>
     /// Occurrences whose local date falls in <c>[fromLocal, toLocal]</c> (inclusive). Each local
     /// wall-clock start is converted to UTC via <see cref="WallClock"/>, so a 16:00 lesson stays at
     /// 16:00 local across DST transitions.

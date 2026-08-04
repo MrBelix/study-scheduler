@@ -9,7 +9,11 @@ internal sealed class TutorProfileConfiguration : IEntityTypeConfiguration<Tutor
 {
     public void Configure(EntityTypeBuilder<TutorProfile> builder)
     {
-        builder.ToTable("TutorProfiles");
+        // The key IS the tenancy key here, and 0 is the "no tenant" sentinel the query filters fall
+        // back to: a profile keyed 0 would belong to every tenant-less scope. A Telegram id is
+        // positive by construction; the database now refuses anything else.
+        builder.ToTable("TutorProfiles", t => t.HasCheckConstraint(
+            "CK_TutorProfiles_TelegramUserIdPositive", "\"TelegramUserId\" > 0"));
 
         // Natural key: one profile per Telegram user, id comes from Telegram.
         builder.HasKey(p => p.TelegramUserId);

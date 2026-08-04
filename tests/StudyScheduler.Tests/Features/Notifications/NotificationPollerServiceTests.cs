@@ -1,11 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using StudyScheduler.API.Core.Scheduling;
+using StudyScheduler.API.Core.Tenancy;
 using StudyScheduler.API.Features.Notifications;
 using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Students;
 using StudyScheduler.Domain.Tutors;
+using StudyScheduler.Tests.Core.Tenancy;
 using StudyScheduler.Tests.Features.Lessons;
 using Xunit;
 
@@ -22,27 +23,27 @@ public class NotificationPollerServiceTests
         // Arrange
         // A due follow-up on a physical lesson is the observable signal that the runner actually ran:
         // if RunTickAsync resolves the runner from the scope and awaits it, the fake sender records one send.
-        var lessons = new FakeLessonRepository();
-        var series = new FakeLessonSeriesRepository();
-        var students = new FakeStudentRepository();
+        // The scope starts tenant-less, exactly as the poller's does — the tick takes its tenant from
+        // each notifiable profile.
+        var tenant = new TutorContext();
+        var lessons = new FakeLessonRepository(tenant);
+        var students = new FakeStudentRepository(tenant);
         var uow = new FakeUnitOfWork();
-        var profiles = new FakeTutorProfileRepository();
+        var profiles = new FakeTutorProfileRepository(tenant);
         var sender = new FakeNotificationSender();
 
         var now = new DateTimeOffset(2026, 7, 6, 15, 0, 0, TimeSpan.Zero);
-        var student = Student.Create(Tutor, "Bob", 100m, CreatedAt).Value;
+        var student = Student.Create("Bob", 100m, CreatedAt).Value.OwnedBy(Tutor);
         students.Items.Add(student);
         var profile = TutorProfile.Create(Tutor, TimeZoneInfo.Utc, CreatedAt).Value;
         profile.UpdateRemindMinutes(null);
         profile.UpdateNotifyAfterLesson(true);
         profiles.Items.Add(profile);
-        lessons.Items.Add(Lesson.Create(Tutor, student.Id, now.AddMinutes(-90), 60, 100m, CreatedAt).Value);
+        lessons.Items.Add(Lesson.Create(student.Id, now.AddMinutes(-90), 60, 100m, CreatedAt).Value.OwnedBy(Tutor));
 
         var runner = new NotificationRunner(
-            profiles, new ScheduleReader(lessons, new SeriesExpansion(lessons, series), students),
-            lessons, series, new LessonMaterializer(students, TimeProvider.System, NullLogger<LessonMaterializer>.Instance),
-            students, sender, new NotificationPlanner(), new NotificationText(), uow,
-            new FixedClock(now), Options.Create(new NotificationsOptions()),
+            profiles, lessons, students, sender, new NotificationPlanner(), new NotificationText(), uow,
+            tenant, new FixedClock(now), Options.Create(new NotificationsOptions()),
             NullLogger<NotificationRunner>.Instance);
 
         var services = new ServiceCollection();

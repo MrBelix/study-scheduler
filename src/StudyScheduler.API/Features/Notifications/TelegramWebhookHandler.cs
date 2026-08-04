@@ -1,3 +1,4 @@
+using StudyScheduler.API.Core.Tenancy;
 using StudyScheduler.API.Features.Lessons;
 using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Primitives;
@@ -11,14 +12,21 @@ namespace StudyScheduler.API.Features.Notifications;
 /// disabled after a 403), and turns a follow-up inline button into a lesson mutation. The handler is
 /// deliberately resilient — a malformed update is answered (or ignored) but never throws, so the
 /// endpoint can always ack 200 and Telegram won't retry-storm.
+/// The mutation itself is not this handler's business: it goes through the very same
+/// <see cref="LessonService"/> seam the app's <c>PATCH /lessons/{id}</c> uses, so a button tap and a
+/// hand edit are the same statement about the same lesson — the <c>IsCustomized</c> latch included.
+/// The webhook is anonymous — Telegram calls it, not a tutor — so the update itself carries the
+/// identity: the user it came from becomes the scope's tenant before any row is read or written, and
+/// that tenant is what scopes every lookup below. A payload can therefore only ever reach the sender's
+/// own data.
 /// </summary>
 public sealed class TelegramWebhookHandler(
-    ILessonRepository lessons,
-    LessonPatchService patchService,
+    LessonService lessons,
     ITutorProfileRepository profiles,
     IUnitOfWork uow,
     INotificationSender sender,
     NotificationText text,
+    ITutorScope tenant,
     ILogger<TelegramWebhookHandler> logger)
 {
     public async Task HandleAsync(Telegram.Bot.Types.Update update, CancellationToken ct = default)
@@ -26,7 +34,12 @@ public sealed class TelegramWebhookHandler(
         // Any interaction from a tutor whose bot we'd flagged unreachable resumes their notifications.
         var userId = update.CallbackQuery?.From.Id ?? update.Message?.From?.Id;
         if (userId is { } id)
+        {
+            // The sender of the update is the tenant of everything below — including the callback
+            // branch, which acts on the very same user.
+            tenant.SetForBackground(id);
             await EnsureReachableAsync(id, ct);
+        }
 
         if (update.CallbackQuery is { } cq)
         {
@@ -40,7 +53,7 @@ public sealed class TelegramWebhookHandler(
     /// <summary>Flips a previously-disabled bot back on so the poller starts targeting the tutor again.</summary>
     private async Task EnsureReachableAsync(long userId, CancellationToken ct)
     {
-        var profile = await profiles.GetAsync(userId, ct);
+        var profile = await profiles.GetAsync(ct);
         if (profile is null || profile.BotReachable)
             return;
 
@@ -59,8 +72,10 @@ public sealed class TelegramWebhookHandler(
             return;
         }
 
-        // Scoping the load to the caller enforces ownership: another tutor's lesson reads as missing.
-        var lesson = await lessons.GetByIdAsync(lessonId, cq.From.Id, track: true, ct);
+        // The tenant is the sender, so ownership is enforced by the read itself: another tutor's
+        // lesson is simply not in this scope's rows. Read-only — this is the guard's own look at the
+        // lesson, and the patch below reads it again to mutate it.
+        var lesson = await lessons.GetAsync(lessonId, ct);
         if (lesson is null)
         {
             logger.LogWarning(
@@ -73,9 +88,12 @@ public sealed class TelegramWebhookHandler(
         // at any time — a late/no-show student is a legitimate cancel even after the scheduled start,
         // and we only ever know the scheduled start, not the actual one. But a lesson the tutor has
         // already recorded as Completed must not be silently undone: refuse and toast instead.
+        // The domain refuses that very transition too (Lesson.AlreadyCompleted), so this is
+        // defence-in-depth — and the reason it stays is the toast: a validation outcome would only
+        // ever reach the tutor as the generic "Could not update" below.
         if (request.Status == LessonStatus.Cancelled && lesson.Status == LessonStatus.Completed)
         {
-            var lang = await ResolveLanguageAsync(cq.From.Id, ct);
+            var lang = await ResolveLanguageAsync(ct);
             logger.LogInformation(
                 "Cancel for lesson {LessonId} ignored: already recorded Completed (tutor {TutorId})",
                 lessonId, cq.From.Id);
@@ -83,7 +101,7 @@ public sealed class TelegramWebhookHandler(
             return;
         }
 
-        var outcome = await patchService.ApplyAsync(lesson, request, cq.From.Id, isNew: false, ct: ct);
+        var outcome = await lessons.UpdateAsync(lessonId, request, ct);
         if (outcome is LessonPatchOutcome.Ok)
         {
             logger.LogInformation(
@@ -94,7 +112,7 @@ public sealed class TelegramWebhookHandler(
             // just keeps the toast.
             if (cq.Message is { } message)
             {
-                var lang = await ResolveLanguageAsync(cq.From.Id, ct);
+                var lang = await ResolveLanguageAsync(ct);
                 var marker = text.ResultMarker(lang, request.Status!.Value, request.IsPaid == true);
                 var originalText = message.Text ?? string.Empty;
                 await sender.EditMessageAsync(message.Chat.Id, message.MessageId, $"{originalText}\n\n{marker}", ct);
@@ -104,17 +122,19 @@ public sealed class TelegramWebhookHandler(
         }
         else
         {
+            // A null outcome means the row vanished between the guard's read and the patch — a race
+            // no toast can be more specific about than the failures below it.
             logger.LogWarning(
                 "Callback mutation of lesson {LessonId} for tutor {TutorId} failed with {Outcome}",
-                lessonId, cq.From.Id, outcome.GetType().Name);
+                lessonId, cq.From.Id, outcome?.GetType().Name ?? "NotFound");
             await sender.AnswerCallbackAsync(cq.Id, "Could not update", ct);
         }
     }
 
     /// <summary>Resolves the tutor's chosen language for a toast, defaulting to Ukrainian.</summary>
-    private async Task<AppLanguage> ResolveLanguageAsync(long tutorId, CancellationToken ct)
+    private async Task<AppLanguage> ResolveLanguageAsync(CancellationToken ct)
     {
-        var profile = await profiles.GetAsync(tutorId, ct);
+        var profile = await profiles.GetAsync(ct);
         return profile?.LanguageCode ?? AppLanguage.Uk;
     }
 

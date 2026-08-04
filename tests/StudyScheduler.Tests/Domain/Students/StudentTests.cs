@@ -1,4 +1,5 @@
 using StudyScheduler.Domain.Students;
+using StudyScheduler.Tests.Core.Tenancy;
 using Xunit;
 
 namespace StudyScheduler.Tests.Domain.Students;
@@ -10,10 +11,11 @@ public class StudentTests
     [Fact]
     public void Create_ValidInput_SetsFieldsAndDefaultsToActive()
     {
-        var student = Student.Create(555, "  Bob  ", 250m, CreatedAt).Value;
+        var student = Student.Create("  Bob  ", 250m, CreatedAt).Value;
 
         Assert.NotEqual(Guid.Empty, student.Id);
-        Assert.Equal(555, student.TutorTelegramId);
+        // Ownership is not the factory's to give: persistence stamps the scope's tutor on insert.
+        Assert.Equal(0, student.TutorTelegramId);
         Assert.Equal("Bob", student.Name);
         Assert.Equal(250m, student.Rate);
         Assert.Equal(StudentStatus.Active, student.Status);
@@ -25,7 +27,7 @@ public class StudentTests
     [InlineData("   ")]
     public void Create_BlankName_Fails(string name)
     {
-        var result = Student.Create(555, name, 100m, CreatedAt);
+        var result = Student.Create(name, 100m, CreatedAt);
 
         Assert.False(result.IsSuccess);
         var error = Assert.Single(result.Errors);
@@ -36,7 +38,7 @@ public class StudentTests
     [Fact]
     public void Create_NegativeRate_Fails()
     {
-        var result = Student.Create(555, "Bob", -1m, CreatedAt);
+        var result = Student.Create("Bob", -1m, CreatedAt);
 
         Assert.False(result.IsSuccess);
         var error = Assert.Single(result.Errors);
@@ -44,18 +46,12 @@ public class StudentTests
         Assert.Equal("Student.NegativeRate", error.Code);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
-    public void Create_NonPositiveTutorId_Throws(long tutorId)
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() => Student.Create(tutorId, "Bob", 100m, CreatedAt));
-    }
-
     [Fact]
     public void UpdateDetails_ReplacesEditableFields()
     {
-        var student = Student.Create(555, "Bob", 100m, CreatedAt).Value;
+        // Stamped as persistence would stamp it, so the ownership assertion below is about a row that
+        // actually has an owner.
+        var student = Student.Create("Bob", 100m, CreatedAt).Value.OwnedBy(555);
 
         var result = student.UpdateDetails("Alice", 300m);
 
@@ -68,7 +64,7 @@ public class StudentTests
     [Fact]
     public void UpdateDetails_BlankName_FailsWithoutMutating()
     {
-        var student = Student.Create(555, "Bob", 100m, CreatedAt).Value;
+        var student = Student.Create("Bob", 100m, CreatedAt).Value;
 
         var result = student.UpdateDetails(" ", 100m);
 
@@ -80,7 +76,7 @@ public class StudentTests
     [Fact]
     public void ChangeStatus_Archives()
     {
-        var student = Student.Create(555, "Bob", 100m, CreatedAt).Value;
+        var student = Student.Create("Bob", 100m, CreatedAt).Value;
 
         var result = student.ChangeStatus(StudentStatus.Archived);
 
@@ -91,7 +87,7 @@ public class StudentTests
     [Fact]
     public void ChangeStatus_UndefinedValue_Fails()
     {
-        var student = Student.Create(555, "Bob", 100m, CreatedAt).Value;
+        var student = Student.Create("Bob", 100m, CreatedAt).Value;
 
         var result = student.ChangeStatus((StudentStatus)99);
 

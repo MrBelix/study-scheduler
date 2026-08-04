@@ -1,9 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using StudyScheduler.API.Core.Scheduling;
-using StudyScheduler.API.Features.Lessons;
 using StudyScheduler.API.Features.Notifications;
 using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Tutors;
+using StudyScheduler.Tests.Core.Tenancy;
 using StudyScheduler.Tests.Features.Lessons;
 using Xunit;
 using TgCallbackQuery = Telegram.Bot.Types.CallbackQuery;
@@ -25,21 +24,26 @@ public class TelegramWebhookHandlerTests
     private static readonly DateTimeOffset Now = new(2026, 7, 15, 12, 0, 0, TimeSpan.Zero);
     private static readonly TimeZoneInfo London = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
 
-    private readonly FakeLessonRepository _lessons = new();
-    private readonly FakeLessonSeriesRepository _series = new();
-    private readonly FakeTutorProfileRepository _profiles = new();
+    private readonly RecordingTutorScope _tenant = new();
+    private readonly FakeLessonRepository _lessons;
+    private readonly FakeLessonSeriesRepository _series;
+    private readonly FakeTutorProfileRepository _profiles;
     private readonly FakeUnitOfWork _uow = new();
     private readonly FakeNotificationSender _sender = new();
     private readonly TelegramWebhookHandler _sut;
 
     public TelegramWebhookHandlerTests()
     {
-        var overlap = new LessonOverlapChecker(
-            _lessons, _series, new SeriesExpansion(_lessons, _series), new FakeStudentRepository(),
-            NullLogger<LessonOverlapChecker>.Instance);
-        var patch = new LessonPatchService(_lessons, overlap, _uow, NullLogger<LessonPatchService>.Instance);
+        // The webhook is anonymous: its scope has no tenant until the update payload names one, and
+        // the repositories read through that very scope.
+        _lessons = new FakeLessonRepository(_tenant);
+        _series = new FakeLessonSeriesRepository(_tenant);
+        _profiles = new FakeTutorProfileRepository(_tenant);
+        // A button tap goes through the very same façade the app's PATCH does.
+        var service = LessonServiceFactory.Create(
+            _tenant, _lessons, _series, new FakeStudentRepository(_tenant), _uow, new FixedClock(Now));
         _sut = new TelegramWebhookHandler(
-            _lessons, patch, _profiles, _uow, _sender, new NotificationText(),
+            service, _profiles, _uow, _sender, new NotificationText(), _tenant,
             NullLogger<TelegramWebhookHandler>.Instance);
     }
 
@@ -50,7 +54,9 @@ public class TelegramWebhookHandlerTests
 
     private Lesson AddLessonAt(DateTimeOffset startUtc, long tutorId = Tutor)
     {
-        var lesson = Lesson.Create(tutorId, Student, startUtc, 60, 100m, CreatedAt).Value;
+        // Stamped by hand: nothing above the database assigns ownership, and the scope has no tenant
+        // until an update arrives.
+        var lesson = Lesson.Create(Student, startUtc, 60, 100m, CreatedAt).Value.OwnedBy(tutorId);
         _lessons.Items.Add(lesson);
         return lesson;
     }
@@ -59,6 +65,22 @@ public class TelegramWebhookHandlerTests
     {
         var lesson = AddLesson();
         lesson.ChangeStatus(LessonStatus.Completed);
+        return lesson;
+    }
+
+    /// <summary>A generated row of a weekly series — 2026-07-20 is a Monday, 16:00 BST = 15:00 UTC.</summary>
+    private Lesson AddSeriesLesson()
+    {
+        var monday = new DateOnly(2026, 7, 20);
+        var series = LessonSeries.Create(
+            Student, WeeklyPattern.Create(Weekdays.Monday, new TimeOnly(16, 0), 60, London).Value,
+            monday, CreatedAt).Value.OwnedBy(Tutor);
+        _series.Items.Add(series);
+
+        var lesson = Lesson.Create(
+            Student, Utc(20, 15), 60, 100m, CreatedAt,
+            seriesId: series.Id, occurrenceDate: monday).Value.OwnedBy(Tutor);
+        _lessons.Items.Add(lesson);
         return lesson;
     }
 
@@ -107,6 +129,35 @@ public class TelegramWebhookHandlerTests
         Assert.Equal(LessonStatus.Completed, lesson.Status);
         Assert.True(lesson.IsPaid);
         Assert.Single(_sender.Answered);
+    }
+
+    [Fact]
+    public async Task HandleAsync_PaidCallbackOnASeriesLesson_LatchesIsCustomized()
+    {
+        // Arrange
+        var lesson = AddSeriesLesson();
+
+        // Act
+        await _sut.HandleAsync(Callback(Tutor, $"p:{lesson.Id:N}"));
+
+        // Assert
+        // "Проведено · Оплачено" is a per-lesson fact about a real lesson, exactly like the app's own
+        // patch — it must survive the schedule being regenerated around it.
+        Assert.True(lesson.IsCustomized);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CancelCallbackOnASeriesLesson_LatchesIsCustomized()
+    {
+        // Arrange
+        var lesson = AddSeriesLesson();
+
+        // Act
+        await _sut.HandleAsync(Callback(Tutor, $"x:{lesson.Id:N}"));
+
+        // Assert
+        Assert.Equal(LessonStatus.Cancelled, lesson.Status);
+        Assert.True(lesson.IsCustomized);
     }
 
     [Fact]
@@ -235,6 +286,37 @@ public class TelegramWebhookHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_Callback_EstablishesTheSendingTutorAsTheTenant()
+    {
+        // Arrange
+        // The webhook is anonymous, so nothing upstream established a tenant: the update payload is
+        // the only identity there is, and it must be in place before any row is touched.
+        var lesson = AddLesson();
+
+        // Act
+        await _sut.HandleAsync(Callback(Tutor, $"c:{lesson.Id:N}"));
+
+        // Assert
+        Assert.Equal(Tutor, _tenant.CurrentTutorTelegramId);
+        Assert.Equal(LessonStatus.Completed, lesson.Status);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CallbackForAnotherTutorsLesson_EstablishesTheSenderNotTheOwnerAsTheTenant()
+    {
+        // Arrange
+        var lesson = AddLesson(Tutor);
+
+        // Act — the callback comes from a different tutor than the lesson's owner.
+        await _sut.HandleAsync(Callback(OtherTutor, $"c:{lesson.Id:N}"));
+
+        // Assert
+        // The payload cannot name a tenant: the sender is the tenant, so the lesson stays out of reach.
+        Assert.Equal(OtherTutor, _tenant.CurrentTutorTelegramId);
+        Assert.Equal(LessonStatus.Scheduled, lesson.Status);
+    }
+
+    [Fact]
     public async Task HandleAsync_UpdateFromUnreachableTutor_ReEnablesReachability()
     {
         // Arrange
@@ -248,5 +330,10 @@ public class TelegramWebhookHandlerTests
 
         // Assert
         Assert.True(profile.BotReachable);
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

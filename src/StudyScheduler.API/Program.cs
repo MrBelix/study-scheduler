@@ -5,6 +5,7 @@ using StudyScheduler.API.Core.ErrorHandling;
 using StudyScheduler.API.Core.OpenApi;
 using StudyScheduler.API.Core.Persistence;
 using StudyScheduler.API.Core.RateLimiting;
+using StudyScheduler.API.Core.Tenancy;
 using StudyScheduler.API.Features.Lessons;
 using StudyScheduler.API.Features.Notifications;
 using StudyScheduler.API.Features.Profile;
@@ -14,6 +15,7 @@ using StudyScheduler.API.Features.Students;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
+builder.Services.AddTenancy();
 builder.AddPersistence();
 
 builder.Services.AddApiDocumentation();
@@ -41,6 +43,9 @@ app.UseApiDocumentation();
 app.UseHttpsRedirection();
 app.UseMiniAppCors();
 app.UseAuthentication();
+// Right after authentication: the tenant of a request is the identity that scheme just validated,
+// and everything downstream reads the database through it.
+app.UseTenancy();
 app.UseAuthorization();
 app.UseRateLimiter();
 

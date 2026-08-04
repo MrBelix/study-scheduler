@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using StudyScheduler.API.Core.Tenancy;
 
 namespace StudyScheduler.API.Core.Persistence;
 
@@ -24,6 +25,7 @@ internal sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbCon
             .UseNpgsql(connectionString)
             .Options;
 
-        return new AppDbContext(options);
+        // Tenant-less: design-time commands read and write schema, never rows.
+        return new AppDbContext(options, new TutorContext());
     }
 }

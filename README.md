@@ -1,4 +1,4 @@
-# StudyScheduler
+﻿# StudyScheduler
 
 A pocket CRM for private tutors, delivered as a **Telegram Mini App**. A tutor opens the app inside
 Telegram to manage students, schedules and finances without juggling Excel, notes and their head.
@@ -215,11 +215,24 @@ Resource ownership is scoped by the Telegram user id (`long`) from the authentic
 is deliberately **no separate `Account` entity**: the product is Telegram-only, so the Telegram id is
 already a stable, unique identity, and a surrogate account would only add a lookup on every request.
 
+That ownership is enforced once, in the persistence layer, rather than by every query: a scoped
+`ITutorContext` carries the tutor of the current request, `AppDbContext` applies it as a global query
+filter to every tutor-owned table and stamps it on insert (filling an owner in, never overwriting
+one — an insert naming a different tutor is refused), and a scope with no tutor reads nothing: it
+filters by the sentinel `0`, which a `CHECK (... > 0)` on every tutor-owned table keeps unreachable.
+Background work (nightly generation, notification polling) and the anonymous Telegram webhook say
+which tenant they mean explicitly; the two reads that span tenants carry `AcrossAllTutors` in their
+name. Nothing above persistence names an owner any more: repository methods, services, readers and
+endpoints carry no `tutorTelegramId` parameter, and the domain factories don't take one either.
+See `src/StudyScheduler.API/README.md#tenancy`.
+
 ### Persistence
 
-EF Core on PostgreSQL. The DbContext is registered through the Aspire Npgsql client integration
-(`AddNpgsqlDbContext<AppDbContext>("Default")`, giving health checks + retries + telemetry), and
-pending migrations are applied on startup. The connection string comes from configuration: a real
+EF Core on PostgreSQL. The DbContext is registered with `AddDbContext` and then enriched by the
+Aspire Npgsql client integration (`EnrichNpgsqlDbContext<AppDbContext>()`, giving health checks +
+retries + telemetry) — `AddNpgsqlDbContext` itself would POOL the context, and a pooled `DbContext`
+cannot take the scoped tenant it filters by as a constructor dependency. Pending migrations are
+applied on startup. The connection string comes from configuration: a real
 PostgreSQL container locally (via the AppHost) or the Dokploy database service in production.
 **Money is always `decimal`; timestamps are UTC** — these are expensive to change once data exists,
 so they're fixed from the start.

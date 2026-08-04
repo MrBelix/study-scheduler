@@ -1,7 +1,6 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
-using StudyScheduler.API.Core.Authentication;
 using StudyScheduler.API.Core.ErrorHandling;
+using StudyScheduler.API.Core.Tenancy;
 using StudyScheduler.API.Core.Time;
 using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Tutors;
@@ -42,11 +41,10 @@ internal static class Endpoints
 
     /// <summary>Returns the current tutor's profile, 404 until it is first saved.</summary>
     public static async Task<Results<Ok<ProfileResponse>, NotFound>> Get(
-        ClaimsPrincipal principal,
         ITutorProfileRepository repo,
         CancellationToken ct)
     {
-        var profile = await repo.GetAsync(principal.GetTelegramId(), ct);
+        var profile = await repo.GetAsync(ct);
         return profile is null
             ? TypedResults.NotFound()
             : TypedResults.Ok(ProfileResponse.From(profile));
@@ -58,9 +56,9 @@ internal static class Endpoints
     /// each other.
     /// </summary>
     public static async Task<Results<Ok<ProfileResponse>, ValidationProblem>> Put(
-        ClaimsPrincipal principal,
         UpdateProfileRequest request,
         ITutorProfileRepository repo,
+        ITutorContext tutor,
         IUnitOfWork uow,
         TimeProvider clock,
         CancellationToken ct)
@@ -95,10 +93,16 @@ internal static class Endpoints
         // The pre-checks above own the HTTP payload wording, so the domain calls below cannot
         // legitimately fail — their Results are still honored (mapped to 400) rather than
         // discarded, so a drift between the two layers can't slip through silently.
-        var profile = await repo.GetAsync(principal.GetTelegramId(), ct);
+        var profile = await repo.GetAsync(ct);
         if (profile is null)
         {
-            var created = TutorProfile.Create(principal.GetTelegramId(), timeZone, clock.GetUtcNow(), languageCode);
+            // The only place tenancy is still spelled out, and it has to be: a profile is KEYED by
+            // the tutor id, so the tenant is this row's identity rather than a column stamped onto
+            // it. The route requires authentication, so the scope always has one.
+            var tutorTelegramId = tutor.CurrentTutorTelegramId
+                ?? throw new InvalidOperationException("No tutor is established for this request.");
+
+            var created = TutorProfile.Create(tutorTelegramId, timeZone, clock.GetUtcNow(), languageCode);
             if (!created.IsSuccess)
                 return created.ToValidationProblem();
             profile = created.Value;
