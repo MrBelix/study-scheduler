@@ -1,4 +1,4 @@
-﻿# StudyScheduler.API
+# StudyScheduler.API
 
 The **web host** and application entry point — an ASP.NET Core (.NET 10) Minimal API. Kept thin: it
 wires infrastructure and maps feature modules, nothing more.

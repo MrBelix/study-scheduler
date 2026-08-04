@@ -1,4 +1,4 @@
-﻿# StudyScheduler
+# StudyScheduler
 
 A pocket CRM for private tutors, delivered as a **Telegram Mini App**. A tutor opens the app inside
 Telegram to manage students, schedules and finances without juggling Excel, notes and their head.

@@ -39,8 +39,9 @@ public sealed class EfLessonSeriesRepository(AppDbContext db) : ILessonSeriesRep
         DateOnly notEndedBefore,
         CancellationToken ct = default) =>
         // IgnoreQueryFilters is the whole point of this method: the nightly pass has no tenant of its
-        // own and must see every tutor's series. Ordered so a capped background pass walks the same
-        // series in the same order every tick.
+        // own and must see every tutor's series. Ordered only so the pass walks them in the same
+        // order every tick — the result is NOT capped, it is every matching series across all
+        // tenants, so a cap belongs here before the count starts to matter.
         await db.LessonSeries
             .IgnoreQueryFilters()
             .AsNoTracking()
