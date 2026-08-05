@@ -380,48 +380,4 @@ public class LessonTests
         Assert.True(result.IsSuccess);
         Assert.Equal(LessonStatus.Scheduled, lesson.Status);
     }
-
-    [Fact]
-    public void Create_FreshLesson_HasNoNotificationsSent()
-    {
-        // Act
-        var lesson = Lesson.Create(Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
-
-        // Assert
-        Assert.Equal(NotificationState.None, lesson.Notifications);
-        Assert.False(lesson.Notifications.IsReminderSent);
-        Assert.False(lesson.Notifications.IsFollowUpSent);
-    }
-
-    [Fact]
-    public void MarkReminderSent_FreshLesson_SetsReminderState()
-    {
-        // Arrange
-        var lesson = Lesson.Create(Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
-        var sentAt = StartUtc.AddMinutes(-30);
-
-        // Act
-        lesson.MarkReminderSent(sentAt);
-
-        // Assert
-        Assert.True(lesson.Notifications.IsReminderSent);
-        Assert.Equal(sentAt, lesson.Notifications.ReminderSentAtUtc);
-        Assert.False(lesson.Notifications.IsFollowUpSent);
-    }
-
-    [Fact]
-    public void MarkFollowUpSent_FreshLesson_SetsFollowUpState()
-    {
-        // Arrange
-        var lesson = Lesson.Create(Guid.NewGuid(), StartUtc, 60, 300m, CreatedAt).Value;
-        var sentAt = StartUtc.AddMinutes(60);
-
-        // Act
-        lesson.MarkFollowUpSent(sentAt);
-
-        // Assert
-        Assert.True(lesson.Notifications.IsFollowUpSent);
-        Assert.Equal(sentAt, lesson.Notifications.FollowUpSentAtUtc);
-        Assert.False(lesson.Notifications.IsReminderSent);
-    }
 }

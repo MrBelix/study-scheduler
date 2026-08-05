@@ -29,9 +29,7 @@ public sealed class Lesson : Entity, ITutorOwned
     public static Expression<Func<Lesson, bool>> IsDebt { get; } =
         lesson => lesson.Status == LessonStatus.Completed && !lesson.IsPaid;
 
-    // EF materialization only: it sets every property (including the Notifications complex type) via
-    // their private setters. The domain constructor below can't be used because EF cannot bind a
-    // complex-type property to a constructor parameter.
+    // EF materialization only: it sets every property via their private setters.
     private Lesson() : base(Guid.Empty) { }
 
     private Lesson(
@@ -100,9 +98,6 @@ public sealed class Lesson : Entity, ITutorOwned
 
     /// <summary>Free-form notes / details for the lesson.</summary>
     public string? Description { get; private set; }
-
-    /// <summary>Which bot notifications have already been sent for this lesson (durable dedup).</summary>
-    public NotificationState Notifications { get; private set; } = NotificationState.None;
 
     /// <summary>
     /// Whether a person deliberately touched this occurrence — rescheduled it, re-priced it, named it,
@@ -262,12 +257,6 @@ public sealed class Lesson : Entity, ITutorOwned
     /// un-customizes a lesson, because the decision was still made.
     /// </summary>
     public void MarkCustomized() => IsCustomized = true;
-
-    /// <summary>Records that the pre-lesson reminder was sent at <paramref name="sentAtUtc"/>.</summary>
-    public void MarkReminderSent(DateTimeOffset sentAtUtc) => Notifications = Notifications.WithReminderSent(sentAtUtc);
-
-    /// <summary>Records that the after-lesson follow-up was sent at <paramref name="sentAtUtc"/>.</summary>
-    public void MarkFollowUpSent(DateTimeOffset sentAtUtc) => Notifications = Notifications.WithFollowUpSent(sentAtUtc);
 
     /// <summary>
     /// The refusal a completed lesson answers a re-timing or a cancellation with — null while it has

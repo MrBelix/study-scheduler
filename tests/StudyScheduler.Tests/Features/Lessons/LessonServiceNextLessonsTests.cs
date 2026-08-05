@@ -8,8 +8,9 @@ namespace StudyScheduler.Tests.Features.Lessons;
 
 /// <summary>
 /// Covers the façade's "next lesson per student" projection now that every lesson is a row: the
-/// earliest non-cancelled one starting at or after "now", named by its own topic or — when the
-/// schedule wrote it and nobody has titled it — by the series it came from.
+/// earliest still-<see cref="LessonStatus.Scheduled"/> one starting at or after "now" — cancelled and
+/// already-completed rows never qualify — named by its own topic or — when the schedule wrote it and
+/// nobody has titled it — by the series it came from.
 /// </summary>
 public class LessonServiceNextLessonsTests
 {
@@ -168,6 +169,59 @@ public class LessonServiceNextLessonsTests
         var lesson = next[StudentId];
         Assert.Equal(new DateTimeOffset(2026, 7, 13, 15, 0, 0, TimeSpan.Zero), lesson.StartUtc);
         Assert.Equal("Algebra", lesson.Subject);
+    }
+
+    [Fact]
+    public async Task GetNextLessonsAsync_NextLessonCompleted_ReturnsTheFollowingOne()
+    {
+        // Arrange
+        // The tutor marks today's lesson Completed early (before its slot elapses) — it must not
+        // still read as "next" over the lesson genuinely still ahead.
+        var series = AddSeries(startDate: Monday);
+        AddSeriesLesson(series, Monday).ChangeStatus(LessonStatus.Completed);
+        AddSeriesLesson(series, Monday.AddDays(7));
+
+        // Act
+        var next = await _sut.GetNextLessonsAsync();
+
+        // Assert
+        var lesson = next[StudentId];
+        Assert.Equal(new DateTimeOffset(2026, 7, 13, 15, 0, 0, TimeSpan.Zero), lesson.StartUtc);
+        Assert.Equal("Algebra", lesson.Subject);
+    }
+
+    [Fact]
+    public async Task GetNextLessonsAsync_OnlyUpcomingLessonCompleted_ReturnsNothingForTheStudent()
+    {
+        // Arrange
+        var series = AddSeries(startDate: Monday);
+        AddSeriesLesson(series, Monday).ChangeStatus(LessonStatus.Completed);
+
+        // Act
+        var next = await _sut.GetNextLessonsAsync();
+
+        // Assert
+        Assert.Empty(next);
+    }
+
+    [Fact]
+    public async Task GetNextLessonsAsync_EarliestRemainingIsScheduled_ReturnsIt()
+    {
+        // Arrange
+        // Completed and cancelled rows sit ahead of the one genuinely open slot; the scheduled one
+        // three weeks out is still the answer.
+        var series = AddSeries(startDate: Monday);
+        AddSeriesLesson(series, Monday).ChangeStatus(LessonStatus.Completed);
+        AddSeriesLesson(series, Monday.AddDays(7)).ChangeStatus(LessonStatus.Cancelled);
+        var scheduled = AddSeriesLesson(series, Monday.AddDays(14));
+
+        // Act
+        var next = await _sut.GetNextLessonsAsync();
+
+        // Assert
+        var lesson = next[StudentId];
+        Assert.Equal(scheduled.Id, lesson.LessonId);
+        Assert.Equal(new DateTimeOffset(2026, 7, 20, 15, 0, 0, TimeSpan.Zero), lesson.StartUtc);
     }
 
     [Fact]

@@ -77,21 +77,60 @@ public class ProfileTests(AppFixture app)
         // First save creates the profile with notifications on by default.
         var created = await PutProfile(tutor, new { timeZoneId = "Europe/Kyiv" });
         Assert.Equal(30, created.RemindMinutes);
-        Assert.True(created.NotifyAfterLesson);
+        Assert.True(created.DaySummary);
 
-        // Explicit settings save: 0 turns reminders off, follow-up off too.
-        var disabled = await PutProfile(tutor, new { timeZoneId = "Europe/Kyiv", remindMinutes = 0, notifyAfterLesson = false });
+        // Explicit settings save: 0 turns reminders off, the evening summary off too.
+        var disabled = await PutProfile(tutor, new { timeZoneId = "Europe/Kyiv", remindMinutes = 0, daySummary = false });
         Assert.Null(disabled.RemindMinutes);
-        Assert.False(disabled.NotifyAfterLesson);
+        Assert.False(disabled.DaySummary);
 
         // A timezone-only save must not touch the notification settings…
         var zoneOnly = await PutProfile(tutor, new { timeZoneId = "Europe/Warsaw" });
         Assert.Null(zoneOnly.RemindMinutes);
-        Assert.False(zoneOnly.NotifyAfterLesson);
+        Assert.False(zoneOnly.DaySummary);
 
         // …and an out-of-range lead time is rejected.
         var invalid = await app.Api.PutAs(tutor, "/profile", new { timeZoneId = "Europe/Warsaw", remindMinutes = 3 });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
+    public async Task Morning_agenda_settings_default_off_and_round_trip()
+    {
+        var tutor = TelegramInitData.ForUser(3206, "Alice");
+
+        // First save creates the profile: morning agenda off by default, 08:00 stored regardless.
+        var created = await PutProfile(tutor, new { timeZoneId = "Europe/Kyiv" });
+        Assert.False(created.MorningAgenda);
+        Assert.Equal("08:00", created.MorningAgendaAt);
+
+        // Explicit opt-in with a custom time.
+        var enabled = await PutProfile(
+            tutor, new { timeZoneId = "Europe/Kyiv", morningAgenda = true, morningAgendaAt = "07:15" });
+        Assert.True(enabled.MorningAgenda);
+        Assert.Equal("07:15", enabled.MorningAgendaAt);
+
+        // A timezone-only save must not touch either setting…
+        var zoneOnly = await PutProfile(tutor, new { timeZoneId = "Europe/Warsaw" });
+        Assert.True(zoneOnly.MorningAgenda);
+        Assert.Equal("07:15", zoneOnly.MorningAgendaAt);
+
+        // …and the stored time survives the toggle being flipped off and back on.
+        var toggledOff = await PutProfile(tutor, new { timeZoneId = "Europe/Warsaw", morningAgenda = false });
+        Assert.False(toggledOff.MorningAgenda);
+        Assert.Equal("07:15", toggledOff.MorningAgendaAt);
+
+        // …and a malformed time is rejected.
+        var invalid = await app.Api.PutAs(
+            tutor, "/profile", new { timeZoneId = "Europe/Warsaw", morningAgendaAt = "7:15" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        // Fresh GET reflects the last successful save, including the tomorrow-lessons hint.
+        var get = await app.Api.GetAs(tutor, "/profile");
+        var fetched = (await get.Content.ReadFromJsonAsync<ProfileDto>())!;
+        Assert.False(fetched.MorningAgenda);
+        Assert.Equal("07:15", fetched.MorningAgendaAt);
+        Assert.Equal(0, fetched.TomorrowLessonsCount);
     }
 
     [Fact]
@@ -151,6 +190,9 @@ public class ProfileTests(AppFixture app)
         string TimeZoneId,
         string? LanguageCode,
         int? RemindMinutes,
-        bool NotifyAfterLesson,
+        bool DaySummary,
+        bool MorningAgenda,
+        string MorningAgendaAt,
+        int TomorrowLessonsCount,
         DateTimeOffset CreatedAtUtc);
 }

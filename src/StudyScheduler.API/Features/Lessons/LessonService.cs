@@ -127,11 +127,13 @@ public sealed partial class LessonService(
         lessons.GetByIdAsync(id, track: false, ct);
 
     /// <summary>
-    /// The next upcoming lesson per student id — the earliest non-cancelled row starting at or after
-    /// now — for every student of the tutor, or just <paramref name="studentId"/>. Students with
-    /// nothing upcoming are absent from the map. The whole tenant is answered in one pass, so the
-    /// students list needs no per-student query; lessons exist physically months ahead, so this is a
-    /// plain query over rows: nothing is expanded and nothing is written.
+    /// The next upcoming lesson per student id — the earliest still-<see cref="LessonStatus.Scheduled"/>
+    /// row starting at or after now — for every student of the tutor, or just <paramref name="studentId"/>.
+    /// Students with nothing upcoming are absent from the map: a lesson the tutor has already marked
+    /// <see cref="LessonStatus.Completed"/> (which can happen before its slot elapses) is a settled fact,
+    /// not something still ahead, and cancelled rows never qualify either. The whole tenant is answered
+    /// in one pass, so the students list needs no per-student query; lessons exist physically months
+    /// ahead, so this is a plain query over rows: nothing is expanded and nothing is written.
     /// </summary>
     public async Task<IReadOnlyDictionary<Guid, UpcomingLesson>> GetNextLessonsAsync(
         Guid? studentId = null,
@@ -140,6 +142,9 @@ public sealed partial class LessonService(
         var earliest = new Dictionary<Guid, Lesson>();
         foreach (var lesson in await lessons.GetFromDateAsync(clock.GetUtcNow(), ct))
         {
+            if (lesson.Status != LessonStatus.Scheduled)
+                continue;
+
             if (studentId is { } id && lesson.StudentId != id)
                 continue;
 

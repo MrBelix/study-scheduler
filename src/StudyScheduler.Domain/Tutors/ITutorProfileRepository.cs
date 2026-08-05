@@ -10,8 +10,9 @@ public interface ITutorProfileRepository
     Task<TutorProfile?> GetAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// EVERY tutor's profile that opts into at least one bot notification (a reminder lead time set
-    /// or the after-lesson follow-up enabled) AND whose bot chat is currently reachable. Read-only,
+    /// EVERY tutor's profile that opts into at least one bot notification (a reminder lead time set,
+    /// the evening day summary, or the morning agenda — see
+    /// <see cref="TutorProfile.WantsAnyNotification"/>) AND whose bot chat is currently reachable. Read-only,
     /// and the one deliberately un-scoped query over profiles: its only caller is the notification
     /// poller, which runs without a user context and must see all tenants — hence the name it has to
     /// be called by.

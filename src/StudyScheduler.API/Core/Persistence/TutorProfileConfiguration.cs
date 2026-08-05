@@ -29,7 +29,11 @@ internal sealed class TutorProfileConfiguration : IEntityTypeConfiguration<Tutor
                 s => AppLanguageCode.ParseCode(s).Value))
             .HasMaxLength(2);
         builder.Property(p => p.RemindMinutes);
-        builder.Property(p => p.NotifyAfterLesson);
+        builder.Property(p => p.DaySummary);
+        // Both opt-ins are new columns on an existing table: the DB defaults are what existing rows
+        // backfill to (the morning agenda is off until the tutor asks for it, at 08:00 local).
+        builder.Property(p => p.MorningAgenda).HasDefaultValue(false);
+        builder.Property(p => p.MorningAgendaAtLocal).HasDefaultValue(new TimeOnly(8, 0));
         // Optimistic reachability: existing rows backfill to reachable via the DB default.
         builder.Property(p => p.BotReachable).HasDefaultValue(true);
         builder.Property(p => p.CreatedAtUtc);

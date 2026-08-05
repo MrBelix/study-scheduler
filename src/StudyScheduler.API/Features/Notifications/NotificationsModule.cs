@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using StudyScheduler.API.Core.Authentication;
+using StudyScheduler.Domain.Notifications;
 using Telegram.Bot;
 
 namespace StudyScheduler.API.Features.Notifications;
@@ -29,9 +30,14 @@ public static class NotificationsModule
             return new TelegramBotClient(token, httpClient);
         });
 
+        services.AddScoped<INotificationDispatchRepository, EfNotificationDispatchRepository>();
         services.AddScoped<INotificationSender, TelegramBotSender>();
         services.AddSingleton<NotificationPlanner>();
-        services.AddSingleton<NotificationText>();
+        // NotificationRenderer only reads IOptions, so one singleton is enough; the view builder reads
+        // tenant-scoped repositories and so must follow the request/tick scope.
+        services.AddSingleton<NotificationRenderer>();
+        services.AddScoped<NotificationViewBuilder>();
+        services.AddScoped<NotificationReconciler>();
         services.AddScoped<NotificationRunner>();
         services.AddScoped<TelegramWebhookHandler>();
         services.AddHostedService<NotificationPollerService>();

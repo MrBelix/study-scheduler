@@ -21,7 +21,9 @@ public sealed class EfTutorProfileRepository(AppDbContext db) : ITutorProfileRep
         await db.TutorProfiles
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(p => (p.RemindMinutes != null || p.NotifyAfterLesson) && p.BotReachable)
+            // TutorProfile.WantsAnyNotification spelled out inline — a computed property is not
+            // SQL-translatable, and this predicate must run in the database.
+            .Where(p => (p.RemindMinutes != null || p.DaySummary || p.MorningAgenda) && p.BotReachable)
             .ToListAsync(ct);
 
     public void Add(TutorProfile profile) => db.TutorProfiles.Add(profile);

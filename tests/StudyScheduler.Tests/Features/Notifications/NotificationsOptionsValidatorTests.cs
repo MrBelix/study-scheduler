@@ -13,7 +13,7 @@ public class NotificationsOptionsValidatorTests
     [Fact]
     public void Validate_DefaultOptions_Succeeds()
     {
-        // Arrange
+        // Arrange — the defaults also disable both the webhook and the deep links, which is valid.
         var options = new NotificationsOptions();
 
         // Act
@@ -41,7 +41,7 @@ public class NotificationsOptionsValidatorTests
     {
         // Arrange
         // MinRemindMinutes is 5; anything above it can skip a reminder between ticks.
-        var options = new NotificationsOptions { PollIntervalMinutes = 6, FollowUpLookbackMinutes = 60 };
+        var options = new NotificationsOptions { PollIntervalMinutes = 6 };
 
         // Act
         var result = Validate(options);
@@ -51,16 +51,87 @@ public class NotificationsOptionsValidatorTests
     }
 
     [Fact]
-    public void Validate_LookbackBelowPollInterval_Fails()
+    public void Validate_NegativeSummaryGrace_Fails()
     {
-        // Arrange
-        var options = new NotificationsOptions { PollIntervalMinutes = 5, FollowUpLookbackMinutes = 4 };
+        // Arrange — a negative grace would send the summary before the day's last lesson ends.
+        var options = new NotificationsOptions { SummaryGraceMinutes = -1 };
 
         // Act
         var result = Validate(options);
 
         // Assert
         Assert.True(result.Failed);
+    }
+
+    [Fact]
+    public void Validate_ZeroSummaryGrace_Succeeds()
+    {
+        // Arrange — sending the moment the day's last lesson ends is a legitimate choice.
+        var options = new NotificationsOptions { SummaryGraceMinutes = 0 };
+
+        // Act
+        var result = Validate(options);
+
+        // Assert
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void Validate_MaxTelegramCallsPerTickBelowOne_Fails()
+    {
+        // Arrange — a tick allowed no calls at all would never drain the queue.
+        var options = new NotificationsOptions { MaxTelegramCallsPerTick = 0 };
+
+        // Act
+        var result = Validate(options);
+
+        // Assert
+        Assert.True(result.Failed);
+    }
+
+    [Fact]
+    public void Validate_AbsoluteHttpsMiniAppUrl_Succeeds()
+    {
+        // Arrange
+        var options = new NotificationsOptions { MiniAppUrl = "https://app.example.org/" };
+
+        // Act
+        var result = Validate(options);
+
+        // Assert
+        Assert.True(result.Succeeded);
+    }
+
+    [Theory]
+    // Not absolute, not https, and one that already carries a query string — "?startapp=" is
+    // appended to this URL, so it cannot bring one of its own.
+    [InlineData("/app")]
+    [InlineData("http://app.example.org/")]
+    [InlineData("https://app.example.org/?ref=bot")]
+    public void Validate_UnusableMiniAppUrl_Fails(string miniAppUrl)
+    {
+        // Arrange
+        var options = new NotificationsOptions { MiniAppUrl = miniAppUrl };
+
+        // Act
+        var result = Validate(options);
+
+        // Assert
+        Assert.True(result.Failed);
+        Assert.Contains("Notifications:MiniAppUrl", result.FailureMessage);
+    }
+
+    [Fact]
+    public void Validate_EmptyMiniAppUrl_Succeeds()
+    {
+        // Arrange — empty means "emit no url buttons", which is the dev/test default.
+        var options = new NotificationsOptions { MiniAppUrl = "" };
+
+        // Act
+        var result = Validate(options);
+
+        // Assert
+        Assert.True(result.Succeeded);
     }
 
     [Fact]

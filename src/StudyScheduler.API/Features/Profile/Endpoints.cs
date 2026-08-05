@@ -1,7 +1,9 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using StudyScheduler.API.Core.ErrorHandling;
 using StudyScheduler.API.Core.Tenancy;
 using StudyScheduler.API.Core.Time;
+using StudyScheduler.Domain.Lessons;
 using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Tutors;
 
@@ -42,12 +44,16 @@ internal static class Endpoints
     /// <summary>Returns the current tutor's profile, 404 until it is first saved.</summary>
     public static async Task<Results<Ok<ProfileResponse>, NotFound>> Get(
         ITutorProfileRepository repo,
+        ILessonRepository lessons,
+        TimeProvider clock,
         CancellationToken ct)
     {
         var profile = await repo.GetAsync(ct);
-        return profile is null
-            ? TypedResults.NotFound()
-            : TypedResults.Ok(ProfileResponse.From(profile));
+        if (profile is null)
+            return TypedResults.NotFound();
+
+        var tomorrowLessonsCount = await CountTomorrowAsync(profile, lessons, clock, ct);
+        return TypedResults.Ok(ProfileResponse.From(profile, tomorrowLessonsCount));
     }
 
     /// <summary>
@@ -60,6 +66,7 @@ internal static class Endpoints
         ITutorProfileRepository repo,
         ITutorContext tutor,
         IUnitOfWork uow,
+        ILessonRepository lessons,
         TimeProvider clock,
         CancellationToken ct)
     {
@@ -68,6 +75,20 @@ internal static class Endpoints
             {
                 ["TimeZoneId"] = ["A valid IANA time zone id is required (e.g. \"Europe/Kyiv\")."],
             });
+
+        // The DTO stays a nullable string, same reasoning as the time zone above: a malformed
+        // value yields the clean ValidationProblem here rather than a JSON-binding 400.
+        TimeOnly? morningAgendaAt = null;
+        if (request.MorningAgendaAt is not null)
+        {
+            if (!TimeOnly.TryParseExact(
+                    request.MorningAgendaAt, "HH\\:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var at))
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["MorningAgendaAt"] = ["A time of day in HH:mm format is required (e.g. \"08:00\")."],
+                });
+            morningAgendaAt = at;
+        }
 
         // The DTO stays a nullable string so an unknown value yields the clean ValidationProblem
         // below rather than a JSON-binding 400. Parse it once, here, through the domain's single
@@ -106,7 +127,7 @@ internal static class Endpoints
             if (!created.IsSuccess)
                 return created.ToValidationProblem();
             profile = created.Value;
-            if (ApplyNotificationSettings(profile, request) is { IsSuccess: false } settingsFailure)
+            if (ApplyNotificationSettings(profile, request, morningAgendaAt) is { IsSuccess: false } settingsFailure)
                 return settingsFailure.ToValidationProblem();
             repo.Add(profile);
         }
@@ -115,16 +136,18 @@ internal static class Endpoints
             profile.UpdateTimeZone(timeZone);
             if (languageCode is { } language)
                 profile.UpdateLanguage(language);
-            if (ApplyNotificationSettings(profile, request) is { IsSuccess: false } settingsFailure)
+            if (ApplyNotificationSettings(profile, request, morningAgendaAt) is { IsSuccess: false } settingsFailure)
                 return settingsFailure.ToValidationProblem();
             repo.Update(profile);
         }
 
         await uow.SaveChangesAsync(ct);
-        return TypedResults.Ok(ProfileResponse.From(profile));
+        var tomorrowLessonsCount = await CountTomorrowAsync(profile, lessons, clock, ct);
+        return TypedResults.Ok(ProfileResponse.From(profile, tomorrowLessonsCount));
     }
 
-    private static Result ApplyNotificationSettings(TutorProfile profile, UpdateProfileRequest request)
+    private static Result ApplyNotificationSettings(
+        TutorProfile profile, UpdateProfileRequest request, TimeOnly? morningAgendaAt)
     {
         if (request.RemindMinutes is { } remind)
         {
@@ -134,8 +157,37 @@ internal static class Endpoints
                 return updated;
         }
 
-        if (request.NotifyAfterLesson is { } notifyAfter)
-            profile.UpdateNotifyAfterLesson(notifyAfter);
+        if (request.DaySummary is { } daySummary)
+            profile.UpdateDaySummary(daySummary);
+
+        if (request.MorningAgenda is { } morningAgenda)
+            profile.UpdateMorningAgenda(morningAgenda);
+
+        // Never gated on MorningAgenda: the client hides the row when the toggle is off, and the
+        // stored time must survive the toggle being flipped off and back on.
+        if (morningAgendaAt is { } at)
+            profile.UpdateMorningAgendaAt(at);
+
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Non-cancelled lessons whose local start date (in the tutor's zone) is tomorrow — the hint the
+    /// agenda-time bottom sheet shows. <see cref="ILessonRepository.GetInRangeAsync"/> intersects the
+    /// UTC day window, so a lesson spilling in from today is filtered back out: a lesson belongs to
+    /// the day it starts on.
+    /// </summary>
+    private static async Task<int> CountTomorrowAsync(
+        TutorProfile profile, ILessonRepository lessons, TimeProvider clock, CancellationToken ct)
+    {
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(clock.GetUtcNow(), profile.TimeZone).DateTime);
+        var tomorrow = today.AddDays(1);
+        var from = WallClock.ToUtc(tomorrow, TimeOnly.MinValue, profile.TimeZone);
+        var to = WallClock.ToUtc(tomorrow.AddDays(1), TimeOnly.MinValue, profile.TimeZone);
+
+        var schedule = await lessons.GetInRangeAsync(from, to, ct: ct);
+        return schedule.Count(l =>
+            l.Status != LessonStatus.Cancelled
+            && DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(l.StartUtc, profile.TimeZone).DateTime) == tomorrow);
     }
 }

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using StudyScheduler.API.Features.Notifications;
 using StudyScheduler.Tests.Core.Tenancy;
 using StudyScheduler.Tests.Features.Lessons;
+using StudyScheduler.Tests.Features.Reports;
 using Xunit;
 using WebhookEndpoints = StudyScheduler.API.Features.Notifications.Endpoints;
 
@@ -29,12 +30,18 @@ public class WebhookEndpointTests
     public WebhookEndpointTests()
     {
         var uow = new FakeUnitOfWork();
-        var service = LessonServiceFactory.Create(
-            _tenant, new FakeLessonRepository(_tenant), new FakeLessonSeriesRepository(_tenant),
-            new FakeStudentRepository(_tenant), uow, TimeProvider.System);
+        var lessons = new FakeLessonRepository(_tenant);
+        var students = new FakeStudentRepository(_tenant);
+        var series = new FakeLessonSeriesRepository(_tenant);
+        var service = LessonServiceFactory.Create(_tenant, lessons, series, students, uow, TimeProvider.System);
+        var renderer = new NotificationRenderer(
+            Microsoft.Extensions.Options.Options.Create(new NotificationsOptions()));
+        var views = new NotificationViewBuilder(
+            lessons, students, series, new FakeStudentDebtReader(lessons), TimeProvider.System);
         _handler = new TelegramWebhookHandler(
-            service, new FakeTutorProfileRepository(_tenant), uow, new FakeNotificationSender(),
-            new NotificationText(), _tenant, NullLogger<TelegramWebhookHandler>.Instance);
+            service, new FakeTutorProfileRepository(_tenant), new FakeNotificationDispatchRepository(_tenant),
+            views, renderer, new FakeNotificationSender(), uow, _tenant, TimeProvider.System,
+            NullLogger<TelegramWebhookHandler>.Instance);
     }
 
     /// <summary>A plain message update from <see cref="Tutor"/> — enough to see the handler run.</summary>

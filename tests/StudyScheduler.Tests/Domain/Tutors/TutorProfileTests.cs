@@ -81,8 +81,28 @@ public class TutorProfileTests
     {
         var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
 
+        // The reminder and the evening summary are on out of the box; the morning agenda is the one
+        // opt-in the tutor has to ask for, and it lands at 08:00 local when they do.
         Assert.Equal(TutorProfile.DefaultRemindMinutes, profile.RemindMinutes);
-        Assert.True(profile.NotifyAfterLesson);
+        Assert.True(profile.DaySummary);
+        Assert.False(profile.MorningAgenda);
+        Assert.Equal(new TimeOnly(8, 0), profile.MorningAgendaAtLocal);
+        Assert.True(profile.WantsAnyNotification);
+    }
+
+    [Fact]
+    public void WantsAnyNotification_EveryOptInOff_IsFalse()
+    {
+        // Arrange
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
+
+        // Act
+        profile.UpdateRemindMinutes(null);
+        profile.UpdateDaySummary(false);
+        profile.UpdateMorningAgenda(false);
+
+        // Assert — the poller has nothing to send this tutor at all.
+        Assert.False(profile.WantsAnyNotification);
     }
 
     [Theory]
@@ -118,12 +138,38 @@ public class TutorProfileTests
     }
 
     [Fact]
-    public void UpdateNotifyAfterLesson_Replaces()
+    public void UpdateDaySummary_Replaces()
     {
         var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
 
-        profile.UpdateNotifyAfterLesson(false);
+        profile.UpdateDaySummary(false);
 
-        Assert.False(profile.NotifyAfterLesson);
+        Assert.False(profile.DaySummary);
+    }
+
+    [Fact]
+    public void UpdateMorningAgenda_Replaces()
+    {
+        // Arrange
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
+
+        // Act
+        profile.UpdateMorningAgenda(true);
+
+        // Assert
+        Assert.True(profile.MorningAgenda);
+    }
+
+    [Fact]
+    public void UpdateMorningAgendaAt_AnyWallClockTime_Replaces()
+    {
+        // Arrange — every wall-clock time is legal, midnight included.
+        var profile = TutorProfile.Create(555, Kyiv, CreatedAt).Value;
+
+        // Act
+        profile.UpdateMorningAgendaAt(new TimeOnly(0, 0));
+
+        // Assert
+        Assert.Equal(new TimeOnly(0, 0), profile.MorningAgendaAtLocal);
     }
 }

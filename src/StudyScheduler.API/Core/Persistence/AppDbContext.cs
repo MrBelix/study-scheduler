@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using StudyScheduler.API.Core.Tenancy;
 using StudyScheduler.Domain.Lessons;
+using StudyScheduler.Domain.Notifications;
 using StudyScheduler.Domain.Primitives;
 using StudyScheduler.Domain.Students;
 using StudyScheduler.Domain.Tutors;
@@ -11,8 +12,10 @@ namespace StudyScheduler.API.Core.Persistence;
 /// The one database session, and the single place tenancy is enforced: every tutor-owned table is
 /// filtered by the scope's tutor on read and stamped with it on insert. A query that must span
 /// tenants has to say so out loud with <c>IgnoreQueryFilters</c> — see
-/// <see cref="ILessonSeriesRepository.GetStartedNotEndedAcrossAllTutorsAsync"/> and
-/// <see cref="ITutorProfileRepository.GetNotifiableAcrossAllTutorsAsync"/>, the only two.
+/// <see cref="ILessonSeriesRepository.GetStartedNotEndedAcrossAllTutorsAsync"/>,
+/// <see cref="ITutorProfileRepository.GetNotifiableAcrossAllTutorsAsync"/> and
+/// <see cref="INotificationDispatchRepository.GetTutorsWithLiveDispatchesAcrossAllTutorsAsync"/>,
+/// the only three.
 /// </summary>
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITutorContext tutor)
     : DbContext(options)
@@ -32,6 +35,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITutorC
 
     public DbSet<Lesson> Lessons => Set<Lesson>();
 
+    public DbSet<NotificationDispatch> NotificationDispatches => Set<NotificationDispatch>();
+
     /// <summary>
     /// The tutor the global query filters compare against. An INSTANCE member on purpose: the model
     /// is built once and cached, but EF re-reads this property from the context that executes the
@@ -50,14 +55,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITutorC
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
-        // Every tutor-owned table, enumerated against the configurations in this folder. Three carry
-        // the owner as a column (StudentConfiguration, LessonConfiguration, LessonSeriesConfiguration);
-        // TutorProfile is KEYED by the tutor id itself (TutorProfileConfiguration), so its own key is
-        // its tenancy key. Per-lesson notification state is a complex property of Lesson — inline
-        // columns on the same row — so it is filtered with it.
+        // Every tutor-owned table, enumerated against the configurations in this folder. Four carry
+        // the owner as a column (StudentConfiguration, LessonConfiguration, LessonSeriesConfiguration,
+        // NotificationDispatchConfiguration); TutorProfile is KEYED by the tutor id itself
+        // (TutorProfileConfiguration), so its own key is its tenancy key.
         modelBuilder.Entity<Student>().HasQueryFilter(s => s.TutorTelegramId == CurrentTutorTelegramId);
         modelBuilder.Entity<Lesson>().HasQueryFilter(l => l.TutorTelegramId == CurrentTutorTelegramId);
         modelBuilder.Entity<LessonSeries>().HasQueryFilter(s => s.TutorTelegramId == CurrentTutorTelegramId);
+        modelBuilder.Entity<NotificationDispatch>().HasQueryFilter(d => d.TutorTelegramId == CurrentTutorTelegramId);
         modelBuilder.Entity<TutorProfile>().HasQueryFilter(p => p.TelegramUserId == CurrentTutorTelegramId);
     }
 

@@ -20,7 +20,9 @@ public sealed class TutorProfile
         LanguageCode = languageCode;
         CreatedAtUtc = createdAtUtc;
         RemindMinutes = DefaultRemindMinutes;
-        NotifyAfterLesson = true;
+        DaySummary = true;
+        MorningAgenda = false;
+        MorningAgendaAtLocal = new TimeOnly(8, 0);
         BotReachable = true;
     }
 
@@ -41,8 +43,14 @@ public sealed class TutorProfile
     /// </summary>
     public int? RemindMinutes { get; private set; }
 
-    /// <summary>Send the after-lesson follow-up prompt (mark completed/paid/cancelled).</summary>
-    public bool NotifyAfterLesson { get; private set; }
+    /// <summary>Send the evening summary that collects the day's unmarked lessons.</summary>
+    public bool DaySummary { get; private set; }
+
+    /// <summary>Send the morning agenda listing the whole day ahead.</summary>
+    public bool MorningAgenda { get; private set; }
+
+    /// <summary>Wall-clock time the morning agenda goes out, in the tutor's own zone.</summary>
+    public TimeOnly MorningAgendaAtLocal { get; private set; }
 
     /// <summary>
     /// Optimistic reachability flag: <c>true</c> means the bot's chat with this tutor is assumed
@@ -51,6 +59,12 @@ public sealed class TutorProfile
     /// re-enabled (handled later by the /start webhook via <see cref="MarkBotReachable"/>).
     /// </summary>
     public bool BotReachable { get; private set; }
+
+    /// <summary>
+    /// Whether the tutor opted into ANY bot notification at all — the single predicate the poller
+    /// selects notifiable profiles by, so a new opt-in cannot be forgotten in one of the two places.
+    /// </summary>
+    public bool WantsAnyNotification => RemindMinutes is not null || DaySummary || MorningAgenda;
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
@@ -95,7 +109,12 @@ public sealed class TutorProfile
         return Result.Success();
     }
 
-    public void UpdateNotifyAfterLesson(bool enabled) => NotifyAfterLesson = enabled;
+    public void UpdateDaySummary(bool enabled) => DaySummary = enabled;
+
+    public void UpdateMorningAgenda(bool enabled) => MorningAgenda = enabled;
+
+    /// <summary>Sets when the morning agenda goes out. Every wall-clock time is legal.</summary>
+    public void UpdateMorningAgendaAt(TimeOnly localTime) => MorningAgendaAtLocal = localTime;
 
     /// <summary>Marks the bot chat undeliverable after a 403 so the poller skips this tutor.</summary>
     public void MarkBotUnreachable() => BotReachable = false;

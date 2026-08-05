@@ -18,7 +18,7 @@ internal sealed class FakeTutorProfileRepository(ITutorContext tutor) : ITutorPr
 
     public Task<IReadOnlyList<TutorProfile>> GetNotifiableAcrossAllTutorsAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<TutorProfile>>(Items
-            .Where(p => (p.RemindMinutes is not null || p.NotifyAfterLesson) && p.BotReachable)
+            .Where(p => p.WantsAnyNotification && p.BotReachable)
             .ToList());
 
     public void Add(TutorProfile profile) => Items.Add(profile);
